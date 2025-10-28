@@ -137,7 +137,8 @@ bool TSpellCorrector::WordIsKnown(const std::wstring& word) const {
     return false;
 }
 
-TWords TSpellCorrector::GetCandidatesRaw(const TWords& sentence, size_t position) const {
+TWords TSpellCorrector::GetCandidatesRaw(const TWords& sentence, size_t position) const 
+{
     TWords candidates;
     TScoredWords scoredCandidates = GetCandidatesRawWithScores(sentence, position);
 

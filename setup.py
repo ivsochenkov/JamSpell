@@ -23,8 +23,8 @@ jamspell = Extension(
         os.path.join('contrib', 'phf', 'phf.cc'),
         os.path.join('jamspell.i'),
     ],
-    extra_compile_args=['-std=c++11', '-O2'],
-    swig_opts=['-c++', '-py3'],
+    extra_compile_args=['-std=c++17', '-O3'],
+    swig_opts=['-c++'],
 )
 
 if sys.platform == 'darwin':

@@ -6,12 +6,6 @@
 #include <cassert>
 #include <algorithm>
 
-#ifdef USE_BOOST_CONVERT
-    #include <boost/locale/encoding_utf.hpp>
-#else
-    #include <codecvt>
-#endif
-
 #include "utils.hpp"
 
 #include <contrib/cityhash/city.h>
@@ -36,7 +30,8 @@ TTokenizer::TTokenizer()
 {
 }
 
-bool TTokenizer::LoadAlphabet(const std::string& alphabetFile) {
+bool TTokenizer::LoadAlphabet(const std::string& alphabetFile) 
+{
     std::string data = LoadFile(alphabetFile);
     if (data.empty()) {
         return false;
@@ -46,17 +41,25 @@ bool TTokenizer::LoadAlphabet(const std::string& alphabetFile) {
         return false;
     }
     ToLower(wdata);
-    std::unordered_set<wchar_t> alphabet;
+    Alphabet.reserve(wdata.size());
     for (auto chr: wdata) {
-        if (chr == 10 || chr == 13) {
+        if (chr == 0 || chr == 10 || chr == 13) 
+        {
             continue;
         }
-        alphabet.insert(chr);
+        Alphabet.push_back(chr);
     }
-    if (alphabet.empty()) {
+    if (Alphabet.empty()) 
+    {
         return false;
     }
-    Alphabet = alphabet;
+    if (Alphabet.size() >= std::numeric_limits<unsigned char>::max()) 
+    {
+        std::cerr << "[error] alphabet size greater than 254 is not supported!\n"; 
+        return false;
+    }
+
+    std::sort(Alphabet.begin(), Alphabet.end());
     return true;
 }
 
@@ -71,8 +74,10 @@ TSentences TTokenizer::Process(const std::wstring& originalText) const {
     TWord currWord;
 
     for (size_t i = 0; i < originalText.size(); ++i) {
-        wchar_t letter = std::tolower(originalText[i], Locale);
-        if (Alphabet.find(letter) != Alphabet.end()) {
+        wchar_t const letter = std::tolower(originalText[i], Locale);
+        //if (Alphabet.find(letter) != Alphabet.end()) 
+        if (0 != FindInAlphabet(letter)) 
+        {
             if (currWord.Ptr == nullptr) {
                 currWord.Ptr = &originalText[i];
             }
@@ -85,8 +90,9 @@ TSentences TTokenizer::Process(const std::wstring& originalText) const {
         }
         if (letter == L'?' || letter == L'!' || letter == L'.') {
             if (!currSentence.empty()) {
-                sentences.push_back(currSentence);
-                currSentence.clear();
+                sentences.emplace_back();
+                sentences.back().swap(currSentence);
+                //currSentence.clear();
             }
         }
     }
@@ -104,8 +110,37 @@ void TTokenizer::Clear() {
     Alphabet.clear();
 }
 
-const std::unordered_set<wchar_t>& TTokenizer::GetAlphabet() const {
-    return Alphabet;
+
+char TTokenizer::FindInAlphabet (wchar_t const ch) const
+{
+    auto const it = std::lower_bound(Alphabet.begin(), Alphabet.end(), ch);
+    return it != Alphabet.end() ? ((*it == ch) ? 
+            static_cast<char> (std::distance(Alphabet.begin(), it) + 1) 
+            : static_cast<char>(0)
+        )
+    : static_cast<char>(0);
+}
+
+std::string TTokenizer::ToAlphabet(TWord const & src) const
+{
+    std::string s(src.Len, '\0');
+    auto tgt = s.begin();
+    for(wchar_t const * pCh (src.Ptr), * const pEnd(src.Ptr + src.Len) 
+        ; pCh != pEnd
+        ; *(tgt++) = FindInAlphabet(*pCh++)
+    ){}
+    return s;
+}
+
+std::wstring TTokenizer::FromAlphabet(std::string const & src) const
+{
+    std::wstring s(src.size(), static_cast<wchar_t> (0) );
+    auto tgt = s.begin();
+    for (char const c : src)
+    {
+        *tgt++ = Alphabet[ c - 1 ];
+    }
+    return s;
 }
 
 std::wstring UTF8ToWide(const std::string& text) {

@@ -19,7 +19,15 @@ constexpr uint64_t LANG_MODEL_MAGIC_BYTE = 8559322735408079685L;
 constexpr uint16_t LANG_MODEL_VERSION = 9;
 constexpr double LANG_MODEL_DEFAULT_K = 0.05;
 
-using TWordId = uint32_t;
+//using TWordId = uint32_t;
+enum class TWordId : uint32_t 
+{
+    Unknown = std::numeric_limits<std::underlying_type<TWordId>::type>::max()
+};
+
+inline constexpr std::underlying_type<TWordId>::type to_underlying(TWordId w)
+{return static_cast<std::underlying_type<TWordId>::type>(w);}
+
 using TCount = uint32_t;
 
 using TGram1Key = TWordId;
@@ -44,7 +52,10 @@ public:
   }
 };
 
-class TRobinSerializer: public NHandyPack::TUnorderedMapSerializer<tsl::robin_map<std::wstring, TWordId>, std::wstring, TWordId> {};
+class TRobinSerializer: public NHandyPack::TUnorderedMapSerializer<
+tsl::robin_map<std::wstring, TWordId>, std::wstring, TWordId> 
+{};
+
 class TRobinHash: public tsl::robin_map<std::wstring, TWordId> {
 public:
     inline virtual void Dump(std::ostream& out) const {
@@ -55,13 +66,18 @@ public:
     }
 };
 
-class TLangModel {
+class TLangModel 
+{
+    struct TGramLoader ;
 public:
+
+    using alphabet_type = TTokenizer::alphabet_type;
+
     bool Train(const std::string& fileName, const std::string& alphabetFile);
     double Score(const TWords& words) const;
     double Score(const std::wstring& str) const;
     TWord GetWord(const std::wstring& word) const;
-    const std::unordered_set<wchar_t>& GetAlphabet() const;
+    alphabet_type const & GetAlphabet() const { return Tokenizer.GetAlphabet();}
     TSentences Tokenize(const std::wstring& text) const;
 
     bool Dump(const std::string& modelFileName) const;
@@ -72,7 +88,7 @@ public:
 
     TWordId GetWordId(const TWord& word);
     TWordId GetWordIdNoCreate(const TWord& word) const;
-    TWord GetWordById(TWordId wid) const;
+    //TWord GetWordById(TWordId wid) const;
     TCount GetWordCount(TWordId wid) const;
 
     uint64_t GetCheckSum() const;
@@ -80,6 +96,7 @@ public:
     HANDYPACK(WordToId, LastWordID, TotalWords, VocabSize,
               PerfectHash, Buckets, Tokenizer, CheckSum)
 private:
+
     TIdSentences ConvertToIds(const TSentences& sentences);
 
     double GetGram1Prob(TWordId word) const;
@@ -91,13 +108,14 @@ private:
     TCount GetGram3HashCount(TWordId word1, TWordId word2, TWordId word3) const;
 
 private:
-    const TWordId UnknownWordId = std::numeric_limits<TWordId>::max();
+    //const TWordId UnknownWordId = std::numeric_limits<TWordId>::max();
     double K = LANG_MODEL_DEFAULT_K;
     TRobinHash WordToId;
-    std::vector<const std::wstring*> IdToWord;
-    TWordId LastWordID = 0;
-    TWordId TotalWords = 0;
-    TWordId VocabSize = 0;
+    //std::vector<const std::wstring*> IdToWord;
+    std::underlying_type<TWordId>::type LastWordID = 0, 
+                                        TotalWords = 0,
+                                        VocabSize = 0;
+
     TTokenizer Tokenizer;
     std::vector<std::pair<uint16_t, uint16_t>> Buckets;
     TPerfectHash PerfectHash;

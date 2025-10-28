@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ostream>
+#include <string_view>
 
 namespace NJamSpell {
 
@@ -15,6 +16,7 @@ public:
     void Clear();
     uint32_t Hash(const std::string& value) const;
     uint32_t Hash(const char* value, size_t size) const;
+    uint32_t Hash(std::string_view const & sw) const {return Hash(sw.data(), sw.size());}
     uint32_t BucketsNumber() const;
 private:
     void* Phf; // sort of forward declaration

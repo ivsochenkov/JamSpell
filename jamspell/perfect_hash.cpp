@@ -57,6 +57,7 @@ void TPerfectHash::Clear() {
     }
     PHF::destroy((phf*)Phf);
     delete (phf*)Phf;
+    Phf = nullptr;
 }
 
 uint32_t TPerfectHash::Hash(const std::string& value) const {

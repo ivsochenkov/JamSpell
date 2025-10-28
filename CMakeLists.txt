@@ -1,9 +1,12 @@
 cmake_minimum_required(VERSION 3.18)
-project(jamspell)
+project(jamspell LANGUAGES CXX)
 
 option(USE_BOOST_CONVERT "use Boost.Locale instead of std::codecvt for string conversion" OFF)
 
-set(CMAKE_CXX_FLAGS "-std=c++11 -fPIC -g")
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+#set(CMAKE_CXX_FLAGS "-std=c++11 -fPIC -g")
 
 find_package(GTest)
 
