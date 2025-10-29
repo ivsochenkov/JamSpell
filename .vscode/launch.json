@@ -11,7 +11,7 @@
         "program": "${workspaceFolder}/build/main/jamspell",
         "args": ["fix"
                 , "${workspaceFolder}/build/main/model.bin"
-                , "${workspaceFolder}/data/test.txt"
+                , "${workspaceFolder}/data/err.txt"
                 , "${workspaceFolder}/build/main/fixed.txt" 
             ],
         "stopAtEntry": false,
@@ -31,7 +31,7 @@
                 "ignoreFailures": true
             }
         ]
-    }
+    },
     {
         "name": "JamSpell -train(gdb) Launch",
         "type": "cppdbg",

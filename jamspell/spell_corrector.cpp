@@ -5,6 +5,15 @@
 
 namespace NJamSpell {
 
+inline std::size_t getOffset(wchar_t const * pos, std::wstring const & src)
+{
+    return std::distance(&src[0], pos);
+}
+
+inline std::wstring_view getOrigWord(std::wstring const &text, std::size_t pos, std::size_t len)
+{
+    return std::wstring_view(text).substr(pos, len);
+}
 
 static std::vector<std::wstring> GetDeletes1(const std::wstring& w) {
     std::vector<std::wstring> results;
@@ -199,60 +208,66 @@ std::vector<std::wstring> TSpellCorrector::GetCandidates(const std::vector<std::
     return results;
 }
 
-std::wstring TSpellCorrector::FixFragment(const std::wstring& inp) const 
+std::wstring TSpellCorrector::FixFragment(const std::wstring& text) const 
 {
-    TSentences origSentences = LangModel.Tokenize(text);
-    std::wstring lowered = text;
-    ToLower(lowered);
-    TSentences sentences = LangModel.Tokenize(lowered);
+    std::wstring in_txt = text;
+    TSentences sentences = LangModel.Tokenize(in_txt);
+    ToLower(in_txt);
+
     std::wstring result;
     size_t origPos = 0;
-    for (size_t i = 0; i < sentences.size(); ++i) {
+    for (size_t i = 0; i < sentences.size(); ++i) 
+    {
         TWords words = sentences[i];
-        const TWords& origWords = origSentences[i];
-        for (size_t j = 0; j < words.size(); ++j) {
-            TWord orig = origWords[j];
-            TWord lowered = words[j];
+        //const TWords& origWords = origSentences[i];
+        for (size_t j = 0; j < words.size(); ++j) 
+        {
+            //TWord orig = origWords[j];
+            //TWord lowered = words[j];
+            TWord const src_word = words[j];
             TWords candidates = GetCandidatesRaw(words, j);
             if (candidates.size() > 0) {
                 words[j] = candidates[0];
             }
-            size_t currOrigPos = orig.Ptr - &text[0];
-            while (origPos < currOrigPos) {
-                result.push_back(text[origPos]);
-                origPos += 1;
-            }
-            std::wstring newWord = std::wstring(words[j].Ptr, words[j].Len);
-            std::wstring origWord = std::wstring(orig.Ptr, orig.Len);
-            std::wstring origLowered = std::wstring(lowered.Ptr, lowered.Len);
-            if (newWord != origLowered) {
-                for (size_t k = 0; k < newWord.size(); ++k) {
+            size_t const currOrigPos = getOffset(src_word.Ptr, in_txt);
+            result += std::wstring_view(text).substr(origPos, currOrigPos - origPos);
+            origPos = currOrigPos;
+            
+            std::wstring_view newWord(words[j].Ptr, words[j].Len);
+            std::wstring_view origWord(getOrigWord(text, currOrigPos, src_word.Len));
+
+            if (newWord != std::wstring_view{src_word.Ptr, src_word.Len}) 
+            {
+                for (size_t k = 0; k < newWord.size(); ++k) 
+                {
                     size_t n = k < origWord.size() ? k : origWord.size() - 1;
                     wchar_t newChar = newWord[k];
                     wchar_t origChar = origWord[n];
                     result.push_back(MakeUpperIfRequired(newChar, origChar));
                 }
-            } else {
+            } 
+            else 
+            {
                 result += origWord;
             }
-            origPos += orig.Len;
+            origPos += src_word.Len;
         }
     }
-    while (origPos < text.size()) {
-        result.push_back(text[origPos]);
-        origPos += 1;
-    }
+    result += std::wstring_view(text).substr(origPos, text.size() - origPos);
     return result;
 }
 
-std::wstring TSpellCorrector::FixFragmentNormalized(const std::wstring& text) const {
-    std::wstring lowered = text;
-    ToLower(lowered);
-    TSentences sentences = LangModel.Tokenize(lowered);
+std::wstring TSpellCorrector::FixFragmentNormalized(const std::wstring& text) const 
+{
+    std::wstring in_text = text;
+    TSentences sentences = LangModel.Tokenize(in_text);
+    ToLower(in_text);    
     std::wstring result;
-    for (size_t i = 0; i < sentences.size(); ++i) {
+    for (size_t i = 0; i < sentences.size(); ++i) 
+    {
         TWords words = sentences[i];
-        for (size_t i = 0; i < words.size(); ++i) {
+        for (size_t i = 0; i < words.size(); ++i) 
+        {
             TWords candidates = GetCandidatesRaw(words, i);
             if (candidates.size() > 0) {
                 words[i] = candidates[0];
