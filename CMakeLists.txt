@@ -22,7 +22,9 @@ if(USE_BOOST_CONVERT)
     add_definitions(-DUSE_BOOST_CONVERT)
 endif()
 
-find_package (Threads)
+find_package (Threads REQUIRED)
+
+find_package (Boost CONFIG REQUIRED)
 
 add_subdirectory(jamspell)
 add_subdirectory(main)

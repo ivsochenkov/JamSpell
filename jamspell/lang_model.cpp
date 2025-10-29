@@ -84,11 +84,11 @@ struct TLangModel::TGramLoader
             if(!l.empty())
             {            
                 bytes_cnt += (1 + l.size());
-                std::wstring trainText (utf8_to_wide(l));
-                ToLower(trainText);
+                std::wstring trainText (utf8_to_wide(l));                
                 trainText_size += trainText.size();
-                TSentences const & sentences = LM.Tokenizer.Process(trainText);
-                TIdSentences const & sentenceIds = LM.ConvertToIds(sentences);
+                TSentences const & sentences = LM.Tokenizer.Tokenize(trainText);
+                ToLower(trainText);
+                TIdSentences const & sentenceIds = LM.ConvertToIds(sentences);                
 
                 FillGramms(sentenceIds);
 
@@ -326,12 +326,14 @@ double TLangModel::Score(const TWords& words) const {
     return result;
 }
 
-double TLangModel::Score(const std::wstring& str) const {
-    TSentences sentences = Tokenizer.Process(str);
+double TLangModel::Score(std::wstring str ) const 
+{
+    TSentences sentences = Tokenizer.Tokenize(str);
+    ToLower(str);
     TWords words;
     for (auto&& s: sentences) {
         for (auto&& w: s) {
-            words.push_back(w);
+            words.emplace_back(std::move(w));
         }
     }
     return Score(words);
@@ -461,7 +463,7 @@ TWord TLangModel::GetWord(const std::wstring& word) const {
 }
 
 TSentences TLangModel::Tokenize(const std::wstring& text) const {
-    return Tokenizer.Process(text);
+    return Tokenizer.Tokenize(text);
 }
 
 double TLangModel::GetGram1Prob(TWordId word) const {

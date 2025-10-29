@@ -2,7 +2,7 @@
 
 #include <string>
 #include <vector>
-// #include <unordered_set>
+#include <string_view>
 #include <locale>
 
 #ifdef USE_BOOST_CONVERT
@@ -27,6 +27,13 @@ struct TWord {
         , Len(w.size())
     {
     }
+
+    TWord(const std::wstring_view& w)
+        : Ptr(&w[0])
+        , Len(w.size())
+    {
+    }
+
     bool operator ==(const TWord& other) const {
         return (Ptr == other.Ptr && Len == other.Len);
     }
@@ -49,29 +56,6 @@ public:
 using TWords = std::vector<TWord>;
 using TScoredWords = std::vector<TScoredWord>;
 using TSentences = std::vector<TWords>;
-
-class TTokenizer {
-public:
-
-    using alphabet_type = std::vector<wchar_t>;
-
-    TTokenizer();
-    bool LoadAlphabet(const std::string& alphabetFile);
-    TSentences Process(const std::wstring& originalText) const;
-    void Clear();
-
-    alphabet_type const & GetAlphabet() const {return Alphabet;}
-
-    char FindInAlphabet (wchar_t const ch) const;
-
-    std::string ToAlphabet(TWord const & s) const;
-    std::wstring FromAlphabet(std::string const & s) const;
-
-    HANDYPACK(Alphabet)
-private:
-    alphabet_type Alphabet;
-    std::locale Locale;
-};
 
 std::string LoadFile(const std::string& fileName);
 void SaveFile(const std::string& fileName, const std::string& data);

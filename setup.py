@@ -17,6 +17,8 @@ jamspell = Extension(
         os.path.join('jamspell', 'lang_model.cpp'),
         os.path.join('jamspell', 'spell_corrector.cpp'),
         os.path.join('jamspell', 'utils.cpp'),
+        os.path.join('jamspell', 'alphabet.cpp'),
+        os.path.join('jamspell', 'tokenizer.cpp'),
         os.path.join('jamspell', 'perfect_hash.cpp'),
         os.path.join('jamspell', 'bloom_filter.cpp'),
         os.path.join('contrib', 'cityhash', 'city.cc'),

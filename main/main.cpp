@@ -69,7 +69,8 @@ int Correct(const std::string& modelFile) {
     }
     std::cerr << "[info] loaded" << std::endl;
     std::cerr << ">> ";
-    for (std::string line; std::getline(std::cin, line);) {
+    for (std::string line; std::getline(std::cin, line);) 
+    {
         std::wstring wtext = UTF8ToWide(line);
         std::wstring result = corrector.FixFragment(wtext);
         std::cerr << WideToUTF8(result) << "\n";

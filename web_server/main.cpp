@@ -6,9 +6,9 @@
 std::string GetCandidates(const NJamSpell::TSpellCorrector& corrector,
                           const std::string& text)
 {
-    std::wstring input = NJamSpell::UTF8ToWide(text);
-    std::transform(input.begin(), input.end(), input.begin(), std::towlower);
+    std::wstring input = NJamSpell::UTF8ToWide(text);    
     NJamSpell::TSentences sentences = corrector.GetLangModel().Tokenize(input);
+    std::transform(input.begin(), input.end(), input.begin(), std::towlower);
 
     nlohmann::json results;
     results["results"] = nlohmann::json::array();

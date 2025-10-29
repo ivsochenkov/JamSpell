@@ -11,7 +11,7 @@ static std::vector<std::wstring> GetDeletes1(const std::wstring& w) {
     for (size_t i = 0; i < w.size(); ++i) {
         auto nw = w.substr(0, i) + w.substr(i+1);
         if (!nw.empty()) {
-            results.push_back(nw);
+            results.push_back(std::move(nw));
         }
     }
     return results;
@@ -23,8 +23,8 @@ static std::vector<std::vector<std::wstring>> GetDeletes2(const std::wstring& w)
         auto nw = w.substr(0, i) + w.substr(i+1);
         if (!nw.empty()) {
             std::vector<std::wstring> currResults = GetDeletes1(nw);
-            currResults.push_back(nw);
-            results.push_back(currResults);
+            currResults.push_back(std::move(nw));
+            results.push_back(std::move(currResults));
         }
     }
     return results;
@@ -199,7 +199,8 @@ std::vector<std::wstring> TSpellCorrector::GetCandidates(const std::vector<std::
     return results;
 }
 
-std::wstring TSpellCorrector::FixFragment(const std::wstring& text) const {
+std::wstring TSpellCorrector::FixFragment(const std::wstring& inp) const 
+{
     TSentences origSentences = LangModel.Tokenize(text);
     std::wstring lowered = text;
     ToLower(lowered);
@@ -287,7 +288,8 @@ inline void AddVec(T& target, const T& source) {
     target.insert(target.end(), source.begin(), source.end());
 }
 
-TWords TSpellCorrector::Edits(const TWord& word) const {
+TWords TSpellCorrector::Edits(const TWord& word) const 
+{
     std::wstring w(word.Ptr, word.Len);
     TWords result;
 
@@ -313,13 +315,15 @@ TWords TSpellCorrector::Edits(const TWord& word) const {
     return result;
 }
 
-TWords TSpellCorrector::Edits2(const TWord& word, bool lastLevel) const {
-    std::wstring w(word.Ptr, word.Len);
+TWords TSpellCorrector::Edits2(const TWord& word, bool lastLevel) const 
+{
+    std::wstring const w(word.Ptr, word.Len);
     TWords result;
 
     for (size_t i = 0; i < w.size() + 1; ++i) {
         // delete
-        if (i < w.size()) {
+        if (i < w.size()) 
+        {
             std::wstring s = w.substr(0, i) + w.substr(i+1);
             TWord c = LangModel.GetWord(s);
             if (c.Ptr && c.Len) {
@@ -348,8 +352,11 @@ TWords TSpellCorrector::Edits2(const TWord& word, bool lastLevel) const {
         }
 
         // replace
-        if (i < w.size()) {
-            for (auto&& ch: LangModel.GetAlphabet()) {
+        if (i < w.size()) 
+        {
+            TAlphabet::letters_type const & sbt = LangModel.GetAlphabet().GetSubstitutes(w[i]);
+            for (auto&& ch: sbt) 
+            {
                 std::wstring s = w.substr(0, i) + ch + w.substr(i+1);
                 TWord c = LangModel.GetWord(s);
                 if (c.Ptr && c.Len) {
@@ -409,7 +416,7 @@ void TSpellCorrector::PrepareCache() {
     for (auto&& it: wordToId) {
         n += 1;
         s += it.first.size();
-        if (n > 3000) {
+        if (n > 5000) {
             break;
         }
     }

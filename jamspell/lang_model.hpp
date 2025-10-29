@@ -8,7 +8,7 @@
 
 #include <contrib/handypack/handypack.hpp>
 #include <contrib/tsl/robin_map.h>
-#include "utils.hpp"
+#include "tokenizer.hpp"
 #include "perfect_hash.hpp"
 
 
@@ -75,7 +75,7 @@ public:
 
     bool Train(const std::string& fileName, const std::string& alphabetFile);
     double Score(const TWords& words) const;
-    double Score(const std::wstring& str) const;
+    double Score(std::wstring str) const;
     TWord GetWord(const std::wstring& word) const;
     alphabet_type const & GetAlphabet() const { return Tokenizer.GetAlphabet();}
     TSentences Tokenize(const std::wstring& text) const;
