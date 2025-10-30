@@ -15,16 +15,13 @@ include_directories(${CMAKE_SOURCE_DIR})
 
 # find Boost if necessary
 if(USE_BOOST_CONVERT)
-    set(Boost_USE_STATIC_LIBS ON)
-    set(Boost_USE_MULTITHREADED ON)
-    find_package(Boost REQUIRED)
     message(STATUS "Using Boost string convert: Enabled")
     add_definitions(-DUSE_BOOST_CONVERT)
 endif()
 
 find_package (Threads REQUIRED)
-
-find_package (Boost CONFIG REQUIRED)
+set(Boost_USE_MULTITHREADED ON)
+find_package (Boost CONFIG REQUIRED locale)
 
 add_subdirectory(jamspell)
 add_subdirectory(main)
