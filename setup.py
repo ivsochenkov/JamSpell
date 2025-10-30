@@ -25,7 +25,7 @@ jamspell = Extension(
         os.path.join('contrib', 'phf', 'phf.cc'),
         os.path.join('jamspell.i'),
     ],
-    extra_compile_args=['-std=c++17', '-O3'],
+    extra_compile_args=['-std=c++17', '-O3' '-g0'],
     swig_opts=['-c++'],
 )
 
@@ -55,10 +55,10 @@ VERSION = '0.0.12'
 setup(
     name='jamspell',
     version=VERSION,
-    author='Filipp Ozinov',
-    author_email='fippo@mail.ru',
-    url='https://github.com/bakwc/JamSpell',
-    download_url='https://github.com/bakwc/JamSpell/tarball/' + VERSION,
+    author='Filipp Ozinov, Ilya V.Sochenkov',
+    author_email='fippo@mail.ru sochenkov@tesyan.ru',
+    url='https://github.com/ivsochenkov/JamSpell',
+    download_url='https://github.com/ivsochenkov/JamSpelltarball/' + VERSION,
     description='spell checker',
     long_description='context-based spell checker',
     keywords=['nlp', 'spell', 'spell-checker', 'jamspell'],
@@ -69,6 +69,8 @@ setup(
         'Programming Language :: Python :: 3.9',
         'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
+        'Programming Language :: Python :: 3.13',
         'License :: OSI Approved :: MIT License',
     ],
     python_requires='>=3.6',

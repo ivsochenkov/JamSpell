@@ -16,3 +16,5 @@ dist/
 jamspell.py
 *.so
 jamspell_wrap.cpp
+*.code-workspace
+.vscode
