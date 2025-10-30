@@ -82,13 +82,46 @@ private:
 #endif
 };
 
-std::wstring UTF8ToWide(const std::string& text);
-std::string WideToUTF8(const std::wstring& text);
+struct wide_to_utf8_t
+{
+    std::string operator () (const std::wstring& text)
+    {
+#ifdef USE_BOOST_CONVERT
+        using boost::locale::conv::utf_to_utf;
+        return utf_to_utf<char>(text.c_str(), text.c_str() + text.size());
+#else
+        
+    return m_cnv.to_bytes(text);
+#endif        
+    }
+
+private:
+#ifdef USE_BOOST_CONVERT
+#else
+    using cnv_type = std::wstring_convert<
+        std::codecvt_utf8<wchar_t, 0x10ffff, std::little_endian>
+        , wchar_t
+    >;
+    cnv_type    m_cnv;
+#endif
+};
+
+//std::wstring UTF8ToWide(const std::string& text);
+//std::string WideToUTF8(const std::wstring& text);
 
 uint64_t GetCurrentTimeMs();
 void ToLower(std::wstring& text);
-wchar_t MakeUpperIfRequired(wchar_t orig, wchar_t sample);
+wchar_t MakeLower(wchar_t orig);
+wchar_t MakeUpper(wchar_t orig);
+
+inline wchar_t MakeUpperIfRequired(wchar_t orig, wchar_t sample) 
+{
+    return (MakeUpper(sample) == sample) ? MakeUpper(orig) : orig;
+}
+
 uint16_t CityHash16(const std::string& str);
 uint16_t CityHash16(const char* str, size_t size);
+inline uint16_t CityHash16(std::string_view const & sw) 
+{return CityHash16(sw.data(), sw.size());}
 
 } // NJamSpell

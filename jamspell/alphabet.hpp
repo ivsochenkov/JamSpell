@@ -27,6 +27,9 @@ public:
         Undefined = std::numeric_limits<std::underlying_type<pos_t>::type>::max() 
     };
 
+    inline std::underlying_type<pos_t>::type raw_pos (pos_t const p) const
+    { return static_cast<std::underlying_type<pos_t>::type> (p);}
+
 private:
 
     struct letter_info_t
@@ -36,9 +39,6 @@ private:
         explicit letter_info_t (wchar_t const l, pos_t const p = pos_t::Undefined)
         : m_letter{l}, m_pos{p} 
         {} 
-
-        inline std::underlying_type<pos_t>::type raw_pos () const
-        { return static_cast<std::underlying_type<pos_t>::type> (m_pos);}
 
         bool operator < (TAlphabet::letter_info_t const & rhs) const
         { return m_letter < rhs.m_letter; }
@@ -57,9 +57,11 @@ public:
 
     bool LoadFromFile (std::string const & fPath);
 
-    char Wch2Ch (wchar_t const ch) const {return static_cast<char>(GetPos(ch)) + 1 ; }
+    char Wch2Ch (wchar_t const ch) const 
+    {return static_cast<char>(GetPos(ch)) + 1 ; }
 
-    wchar_t Ch2Wch (char const ch) const {return m_letters[ch - 1].m_letter; }
+    wchar_t Ch2Wch (char const ch) const 
+    {return m_letters[raw_pos(pos_t(ch - 1))].m_letter; }
 
     letters_type const & GetSubstitutes (wchar_t const ch) const ;
 

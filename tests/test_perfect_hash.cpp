@@ -6,7 +6,7 @@
 TEST(PerfetHashTest, basicFlow) {
 
     NJamSpell::TPerfectHash ph;
-    std::vector<std::string> keys = {
+    std::vector<std::string_view> keys = {
         "key1",
         "key2",
         "key3",

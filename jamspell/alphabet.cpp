@@ -47,6 +47,12 @@ bool TAlphabet::LoadFromFile (std::string const & fPath)
 
             auto & sbst = m_substitites.emplace_back();
             m_letters.emplace_back(chr, pos_t(m_substitites.size()));
+            wchar_t const upChr = MakeUpper(chr);
+            if(chr != upChr)
+            {
+                m_letters.emplace_back(upChr, pos_t(m_substitites.size()));
+            }
+
             ++lcnt;  
 
             if (m_substitites.size() >= static_cast<std::size_t> (pos_t::Undefined)) 
@@ -85,7 +91,7 @@ TAlphabet::letters_type const & TAlphabet::GetSubstitutes (wchar_t const ch) con
     static const letters_type empty_sbst;
     auto const it = std::lower_bound(m_letters.begin(), m_letters.end(), letter_info_t {ch} );
     return (it != m_letters.end()) && (it -> m_letter == ch)  ? 
-            m_substitites[ it -> raw_pos() ]
+            m_substitites[ raw_pos( it -> m_pos) ]
         : empty_sbst ;
 }
 
@@ -93,7 +99,7 @@ TAlphabet::pos_t TAlphabet::GetPos (wchar_t const ch) const
 {
     auto const it = std::lower_bound(m_letters.begin(), m_letters.end(), letter_info_t {ch} );
     return (it != m_letters.end()) && (it -> m_letter == ch)  ? 
-            pos_t (std::distance(m_letters.begin(), it))
+            it -> m_pos
         :   pos_t::Undefined;
 }
 

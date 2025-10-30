@@ -8,10 +8,14 @@
 #include <algorithm>
 #include <string_view>
 #include <filesystem>
+#include <array>
+#include <functional>
 
 #include "lang_model.hpp"
 
 #include <contrib/cityhash/city.h>
+#include <contrib/tsl/robin_set.h>
+#include <contrib/tsl/robin_map.h>
 
 #ifndef ssize_t
 #define ssize_t int
@@ -49,20 +53,124 @@ private:
     long Pos;
 };
 
+TLangModel::train_options_t TLangModel::train_options_t::make_default()
+{
+    return train_options_t{};
+}
+
+class TGramKey 
+{
+    using storage_type = std::array<TWordId, 3>;
+
+public:
+
+    enum class ngram_type : unsigned char 
+    {            
+            nGram1 = 0
+        ,   nGram2
+        ,   nGram3
+        ,   nUndef  
+    };
+
+    explicit TGramKey (TWordId const & n1 = TWordId::Unknown
+        , TWordId const & n2 = TWordId::Unknown
+        , TWordId const & n3 = TWordId::Unknown
+    ) 
+    : m_elems{n1, n2, n3} 
+    {}
+
+    bool operator < (TGramKey const & rhs) const 
+    { return m_elems < rhs.m_elems; }
+
+    bool operator == (TGramKey const & rhs) const 
+    { return m_elems == rhs.m_elems; }
+
+    std::string_view bytes() const 
+    {
+        return std::string_view(reinterpret_cast<const char*>(m_elems.data())
+            , m_elems.size()*sizeof(m_elems[0])
+        );
+    }
+
+    inline ngram_type kind() const;
+
+    using const_iterator = storage_type::const_iterator;
+
+    const_iterator begin () const {return m_elems.begin();}
+    const_iterator end () const 
+    {
+        for(const_iterator i = m_elems.begin(); i != m_elems.end(); ++i)
+        {
+            if(*i == TWordId::Unknown)
+                return i;
+        }
+        return m_elems.end();
+    }
+
+private:
+    storage_type    m_elems;
+};
+
+inline std::underlying_type<TGramKey::ngram_type>::type to_underlying(TGramKey::ngram_type nt)
+{
+    return static_cast<std::underlying_type<TGramKey::ngram_type>::type> (nt);
+}
+
+inline TGramKey::ngram_type & operator --(TGramKey::ngram_type & nt)
+{
+    auto u = to_underlying(nt);
+    return (nt = TGramKey::ngram_type( --u ) );
+}
+
+TGramKey::ngram_type TGramKey::kind() const
+{
+    ngram_type nt {ngram_type::nGram3};
+    for(auto i = m_elems.rbegin(); i != m_elems.rend(); ++i, --nt )
+    {
+        if(*i != TWordId::Unknown)
+            return nt;
+    }
+    return ngram_type::nUndef;
+}
+
+struct TGramKeyHash
+{
+    std::size_t operator()(const TGramKey& x) const 
+    {
+        return std::hash<std::string_view>{}(x.bytes());
+    }
+};
+
 struct TLangModel::TGramLoader 
 {
-    TLangModel                              &LM;
-    std::unordered_map<TGram1Key, TCount>   grams1;
-    std::unordered_map<TGram2Key, TCount, TGram2KeyHash> grams2;
-    std::unordered_map<TGram3Key, TCount, TGram3KeyHash> grams3;
+    using grams_type = tsl::robin_map<TGramKey, TCount
+        , TGramKeyHash
+        , std::equal_to<TGramKey>
+        , std::allocator<std::pair<TGramKey, TCount> >
+        , true // store hash
+        , tsl::rh::mod_growth_policy<std::ratio<11, 10> >
+    >;
 
-    std::size_t trainText_size, sentences_size, max_grams1_sz, max_grams2_sz, max_grams3_sz;
+    using word_id_set_type = tsl::robin_set<TWordId>;
 
-    explicit TGramLoader(TLangModel & lm)
+    TLangModel                  &   LM;
+    train_options_t                 m_tr_opt;
+    grams_type                      m_grams;    
+
+    std::size_t                     trainText_size
+                                ,   sentences_size
+                                ;
+
+    explicit TGramLoader(TLangModel & lm, train_options_t const & tr_opt)
     : LM(lm)
+    , m_tr_opt{tr_opt}
     , trainText_size{0}, sentences_size{0}
-    , max_grams1_sz{10000000}, max_grams2_sz{20000000}, max_grams3_sz{40000000}
-    {}
+    {
+        LM.WordToId.reserve (m_tr_opt.max_grams_sz / 3);
+        m_grams.reserve(m_tr_opt.max_grams_sz * m_tr_opt.growth_factor);
+    }
+
+    grams_type & grams() {return m_grams;}
 
     bool Load(const std::string& fName)
     {
@@ -97,13 +205,15 @@ struct TLangModel::TGramLoader
                     uint64_t const currTime = GetCurrentTimeMs();
                     if (currTime - lastTime > 4000) 
                     {
-                        std::cerr << "[info] processed " << (100.0 * float(bytes_cnt) / float(file_sz)) << "%" << std::endl;
+                        std::cerr << "[info] processed " 
+                            << (100.0 * float(bytes_cnt) / float(file_sz)) 
+                            << "%" << std::endl;
                         lastTime = currTime;
                     }
                 }                
             }        
         }
-        Reduce();   
+        Reduce();          
         return lcnt;  
     }
 
@@ -115,19 +225,19 @@ private:
         {
             for (auto const & w: words) 
             {
-                grams1[w] += 1u;
+                m_grams[TGramKey(w)] += 1u;
                 LM.TotalWords += 1u;
             }
-            if (words.size() > 2)
+            if (words.size() >= 2)
             {
                 for (auto it {words.begin()}, nxt{it + 1}, e{words.end()}
-                    ; nxt != e; grams2[TGram2Key {*it++, *nxt++}] += 1u
+                    ; nxt != e; m_grams[TGramKey {*it++, *nxt++}] += 1u
                 ){}
             }
-            if(words.size() > 3)
+            if(words.size() >= 3)
             {
                 for (auto it {words.begin()}, nxt1{it + 1}, nxt2{nxt1 + 1}, e{words.end()}
-                    ; nxt2 != e; grams3[TGram3Key {*it++, *nxt1++, *nxt2++}] += 1u
+                    ; nxt2 != e; m_grams[TGramKey {*it++, *nxt1++, *nxt2++}] += 1u
                 ){}
             }        
         }
@@ -135,64 +245,79 @@ private:
         ReduceIfNeeded();
     }
 
-    template <typename TMap> void Reduce (char const * nGrNam
-        , TMap & grams
-        , std::size_t & mx_sz
-        , std::size_t const threshold = 2u
-        , float gf = 1.02
-    )
+    void Reduce ()
     {
-        std::cerr << "--[info] started reduce of " << nGrNam 
-        << " size = " << grams.size() << " with threshold="<< threshold << std::endl;
+        std::cerr << "--[info] started reduce of grams: size = " << m_grams.size() 
+            << " with threshold="<< m_tr_opt.max_grams_sz << std::endl;
 
-        if (gf < 1.0 || gf > 2.0)
-            gf = 1.02;
-
-        for (auto it {grams.begin()}, e {grams.end()}
+        for (auto it {m_grams.begin()}, e {m_grams.end()}
             ; it != e
-            ; ( it -> second > threshold) ? ++it : (it->first, it = grams.erase(it))
-        ) {} 
-        mx_sz *= gf;
+            ; 
+        ) 
+        {
+            TGramKey::ngram_type const nt = it -> first.kind();
+            if (it -> second >= m_tr_opt.ngram_thresholds[ to_underlying(nt) ])
+            {
+                ++it;
+                //stat.inc_left(nt);
+            }
+            else
+            {
+                it = m_grams.erase(it);
+                //stat.inc_del(nt);
+            }
+        } 
 
-        std::cerr << "--[info] finished reduce of " << nGrNam 
-            << " size = " << grams.size() << " new threshold_size="<< mx_sz << std::endl;
+        CleanupVocabulary();
+
+        m_tr_opt.max_grams_sz *= m_tr_opt.growth_factor;
+
+        std::cerr << "--[info] finished reduce of grams: size = " << m_grams.size() 
+            << " new max_grams_sz = "<< m_tr_opt.max_grams_sz << std::endl;
+
     }
 
-    template <typename TMap> void ReduceIfNeeded (char const * nGrNam
-        , TMap & grams
-        , std::size_t & mx_sz
-        , std::size_t const threshold = 2u
-        , float const gf = 1.02
-    )
+    void ReduceIfNeeded ()
     {
-        if(grams.size() >= mx_sz)
+        if(m_grams.size() >= m_tr_opt.max_grams_sz)
         {
-            Reduce(nGrNam, grams, mx_sz, threshold, gf);
+            Reduce();
         }
     }
 
-    void ReduceIfNeeded()
+    word_id_set_type PopulateWordIds ()
     {
-        ReduceIfNeeded("one-word-grams", grams1, max_grams1_sz, 6);
-        ReduceIfNeeded("two-word-grams", grams2, max_grams2_sz, 3);
-        ReduceIfNeeded("three-word-grams", grams3, max_grams3_sz, 2);
+        word_id_set_type wordIds;
+        wordIds.reserve(LM.WordToId.size());
+        for(auto const & g: m_grams)
+        {
+            for (TWordId const & wid: g.first)
+            {
+                wordIds.insert(wid);
+            }
+        }
+        return wordIds;
     }
 
-    void Reduce()
+    void CleanupVocabulary() 
     {
-        Reduce("one-word-grams", grams1, max_grams1_sz, 6);
-        Reduce("two-word-grams", grams2, max_grams2_sz, 3);
-        Reduce("three-word-grams", grams3, max_grams3_sz, 2);
-    }
+        std::cerr << "++[info] cleanup vocabulary... size = " 
+            << LM.WordToId.size() << std::endl;
 
-    template <typename TKey> void Cleanup(TKey const & k) {}
-    void Cleanup(TWordId const & k) 
-    {
-        //LM.WordToId.erase(k);        
+        word_id_set_type const & wordIds = PopulateWordIds();
+        for (auto it = LM.WordToId.begin(), e = LM.WordToId.end()
+            ; it != e
+            ; (wordIds.find(it -> second) != wordIds.end() )
+                ? ++it : it = LM.WordToId.erase(it)
+        ){}     
+
+        std::cerr << "++[info] done cleanup vocabulary... size = " 
+            << LM.WordToId.size() << std::endl;
     }
 
 };
 
+/*
 template<typename T>
 std::string DumpKey(const T& key) {
     std::stringbuf buf;
@@ -201,13 +326,14 @@ std::string DumpKey(const T& key) {
     return buf.str();
 }
 
+
 template<typename T>
 void PrepareNgramKeys(const T& grams, std::vector<std::string>& keys) {
     for (auto&& it: grams) {
         keys.push_back(DumpKey(it.first));
     }
 }
-
+*/
 static const uint32_t MAX_REAL_NUM = 268435456;
 static const uint32_t MAX_AVAILABLE_NUM = 65536;
 
@@ -227,79 +353,79 @@ inline uint32_t UnpackInt32(uint16_t num) {
 }
 
 template<typename T>
-void InitializeBuckets(const T& grams, TPerfectHash& ph, std::vector<std::pair<uint16_t, uint16_t>>& buckets) {
-    for (auto&& it: grams) {
-        std::string key = DumpKey(it.first);
-        //std::string_view const key (mk_string_view(it.first));
-        uint32_t bucket = ph.Hash(key);
-        if (bucket >= buckets.size()) {
+void InitializeBuckets(const T& grams
+    , TPerfectHash& ph
+    , std::vector<std::pair<uint16_t, uint16_t>>& buckets
+) 
+{
+    for (auto&& it: grams) 
+    {
+        //std::string key = DumpKey(it.first);
+        std::uint32_t const bucket = ph.Hash(it.first.bytes());
+        if (bucket >= buckets.size()) 
+        {
             std::cerr << bucket << " " << buckets.size() << "\n";
         }
         assert(bucket < buckets.size());
         std::pair<uint16_t, uint16_t> data;
-        data.first = CityHash16(key);
+        data.first = CityHash16(it.first.bytes());
         data.second = PackInt32(it.second);
         buckets[bucket] = data;
     }
 }
 
-bool TLangModel::Train(const std::string& fileName, const std::string& alphabetFile) {
+bool TLangModel::Train(const std::string& fileName
+    , const std::string& alphabetFile
+    , train_options_t const & tr_opt
+) 
+{
 
     std::cerr << "[info] loading text" << std::endl;
     uint64_t trainStarTime = GetCurrentTimeMs();
-    if (!Tokenizer.LoadAlphabet(alphabetFile)) {
+    if (!Tokenizer.LoadAlphabet(alphabetFile)) 
+    {
         std::cerr << "[error] failed to load alphabet" << std::endl;
         return false;
     }
     
-    TGramLoader gldr{*this};
+    TGramLoader gldr{*this, tr_opt};
     if(!gldr.Load(fileName))
     {
         std::cerr << "[error] failed to load grams" << std::endl;
         return false;
     }
 
-    VocabSize = gldr.grams1.size();
+    //VocabSize = gldr.grams().size();
+    VocabSize = WordToId.size();
     if(!VocabSize)
     {
         std::cerr << "[error] got empty vocabulary: not enough frequent grams" << std::endl;
         return false;
     }
 
-    std::cerr << "[info] generating keys" << std::endl;
-
+    std::cerr << "[info] generating perf hash" << std::endl;
+    struct extract_as_bytes_t
     {
-        std::vector<std::string> keys;
-        std::size_t const ttlGrams {gldr.grams1.size() + gldr.grams2.size() + gldr.grams3.size()};
-        keys.reserve(ttlGrams);
-
-        std::cerr << "[info] ngrams1: " << gldr.grams1.size() << "\n";
-        std::cerr << "[info] ngrams2: " << gldr.grams2.size() << "\n";
-        std::cerr << "[info] ngrams3: " << gldr.grams3.size() << "\n";
-        std::cerr << "[info] total: " << ttlGrams << "\n";
-
-        PrepareNgramKeys(gldr.grams1, keys);
-        PrepareNgramKeys(gldr.grams2, keys);
-        PrepareNgramKeys(gldr.grams3, keys);
-
-        std::cerr << "[info] generating perf hash" << std::endl;
-
-        PerfectHash.Init(keys);
-    }
-
+        auto operator () (TGramLoader::grams_type::value_type const & gvt) const
+        {return gvt.first.bytes();}
+    };
+    static const extract_as_bytes_t extract_as_bytes{};
+    PerfectHash.Init(boost::make_transform_iterator(gldr.grams().begin(), extract_as_bytes)
+        , boost::make_transform_iterator(gldr.grams().end(), extract_as_bytes)
+    );
+    
     std::cerr << "[info] finished, buckets: " << PerfectHash.BucketsNumber() << "\n";
 
     Buckets.resize(PerfectHash.BucketsNumber());
-    InitializeBuckets(gldr.grams1, PerfectHash, Buckets);
-    InitializeBuckets(gldr.grams2, PerfectHash, Buckets);
-    InitializeBuckets(gldr.grams3, PerfectHash, Buckets);
-
+    InitializeBuckets(gldr.grams(), PerfectHash, Buckets);
+    
     std::cerr << "[info] buckets filled" << std::endl;
 
     std::stringbuf checkSumBuf;
     std::ostream checkSumOut(&checkSumBuf);
-    NHandyPack::Dump(checkSumOut, trainStarTime, gldr.grams1.size(), gldr.grams2.size(),
-                    gldr.grams3.size(), Buckets.size(), gldr.trainText_size, gldr.sentences_size);
+    NHandyPack::Dump(checkSumOut, trainStarTime, gldr.grams().size()
+        , Buckets.size(), gldr.trainText_size, gldr.sentences_size
+    );
     std::string checkSumStr = checkSumBuf.str();
     CheckSum = CityHash64(&checkSumStr[0], checkSumStr.size());
     return true;
@@ -494,54 +620,49 @@ double TLangModel::GetGram3Prob(TWordId word1, TWordId word2, TWordId word3) con
     return countsGram3 / countsGram2;
 }
 
-template<typename T>
-TCount GetGramHashCount(T key,
-                        const TPerfectHash& ph,
-                        const std::vector<std::pair<uint16_t, uint16_t>>& buckets)
+TCount GetGramHashCount(TGramKey const & key
+    , const TPerfectHash& ph
+    , const std::vector<std::pair<uint16_t, uint16_t>>& buckets
+)
 {
-    constexpr int TMP_BUF_SIZE = 128;
-    char tmpBuff[TMP_BUF_SIZE];
-    MemStream tmpBuffStream(tmpBuff, TMP_BUF_SIZE - 1);
-    std::ostream out(&tmpBuffStream);
-
-    tmpBuffStream.Reset();
-
-    NHandyPack::Dump(out, key);
-
-    uint32_t bucket = ph.Hash(tmpBuff, tmpBuffStream.Size());
+    uint32_t const bucket = ph.Hash(key.bytes());
 
     assert(bucket < ph.BucketsNumber());
     const std::pair<uint16_t, uint16_t>& data = buckets[bucket];
 
-    TCount res = TCount();
-    if (data.first == CityHash16(tmpBuff, tmpBuffStream.Size())) {
+    TCount res = TCount{};
+    if (data.first == CityHash16(key.bytes())) 
+    {
         res = UnpackInt32(data.second);
     }
     return res;
 }
 
-TCount TLangModel::GetGram1HashCount(TWordId word) const {
-    if (word == TWordId::Unknown) {
+TCount TLangModel::GetGram1HashCount(TWordId word) const 
+{
+    if (word == TWordId::Unknown) 
+    {
         return TCount();
     }
-    TGram1Key key = word;
-    return GetGramHashCount(key, PerfectHash, Buckets);
+    return GetGramHashCount(TGramKey{word}, PerfectHash, Buckets);
 }
 
-TCount TLangModel::GetGram2HashCount(TWordId word1, TWordId word2) const {
-    if (word1 == TWordId::Unknown || word2 == TWordId::Unknown) {
+TCount TLangModel::GetGram2HashCount(TWordId word1, TWordId word2) const 
+{
+    if (word1 == TWordId::Unknown || word2 == TWordId::Unknown) 
+    {
         return TCount();
     }
-    TGram2Key key({word1, word2});
-    return GetGramHashCount(key, PerfectHash, Buckets);
+    return GetGramHashCount(TGramKey (word1, word2), PerfectHash, Buckets);
 }
 
-TCount TLangModel::GetGram3HashCount(TWordId word1, TWordId word2, TWordId word3) const {
-    if (word1 == TWordId::Unknown || word2 == TWordId::Unknown || word3 == TWordId::Unknown) {
+TCount TLangModel::GetGram3HashCount(TWordId word1, TWordId word2, TWordId word3) const 
+{
+    if (word1 == TWordId::Unknown || word2 == TWordId::Unknown || word3 == TWordId::Unknown) 
+    {
         return TCount();
     }
-    TGram3Key key(word1, word2, word3);
-    return GetGramHashCount(key, PerfectHash, Buckets);
+    return GetGramHashCount(TGramKey (word1, word2, word3), PerfectHash, Buckets);
 }
 
 } // NJamSpell

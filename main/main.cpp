@@ -32,8 +32,9 @@ int Score(const std::string& modelFile) {
     }
     std::cerr << "[info] loaded" << std::endl;
     std::cerr << ">> ";
+    utf8_to_wide_t utf8_to_wide;
     for (std::string line; std::getline(std::cin, line);) {
-        std::wstring wtext = UTF8ToWide(line);
+        std::wstring wtext = utf8_to_wide(line);
         std::cerr << model.Score(wtext) << "\n";
         std::cerr << ">> ";
     }
@@ -51,11 +52,13 @@ int Fix(const std::string& modelFile,
         return 42;
     }
     std::cerr << "[info] loaded" << std::endl;
-    std::wstring text = UTF8ToWide(LoadFile(inputFile));
+    utf8_to_wide_t utf8_to_wide;
+    std::wstring text = utf8_to_wide(LoadFile(inputFile));
     uint64_t startTime = GetCurrentTimeMs();
     std::wstring result = corrector.FixFragment(text);
     uint64_t finishTime = GetCurrentTimeMs();
-    SaveFile(outFile, WideToUTF8(result));
+    wide_to_utf8_t wide_to_utf8;
+    SaveFile(outFile, wide_to_utf8(result));
     std::cerr << "[info] process time: " << finishTime - startTime << "ms" << std::endl;
     return 0;
 }
@@ -69,11 +72,13 @@ int Correct(const std::string& modelFile) {
     }
     std::cerr << "[info] loaded" << std::endl;
     std::cerr << ">> ";
+    utf8_to_wide_t utf8_to_wide;
+    wide_to_utf8_t wide_to_utf8;
     for (std::string line; std::getline(std::cin, line);) 
     {
-        std::wstring wtext = UTF8ToWide(line);
+        std::wstring wtext = utf8_to_wide(line);
         std::wstring result = corrector.FixFragment(wtext);
-        std::cerr << WideToUTF8(result) << "\n";
+        std::cerr << wide_to_utf8(result) << "\n";
         std::cerr << ">> ";
     }
     return 0;

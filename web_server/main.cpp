@@ -6,7 +6,9 @@
 std::string GetCandidates(const NJamSpell::TSpellCorrector& corrector,
                           const std::string& text)
 {
-    std::wstring input = NJamSpell::UTF8ToWide(text);    
+    NJamSpell::utf8_to_wide_t utf8_to_wide;
+    NJamSpell::wide_to_utf8_t wide_to_utf8;
+    std::wstring input = utf8_to_wide(text);    
     NJamSpell::TSentences sentences = corrector.GetLangModel().Tokenize(input);
     std::transform(input.begin(), input.end(), input.begin(), std::towlower);
 
@@ -34,7 +36,9 @@ std::string GetCandidates(const NJamSpell::TSpellCorrector& corrector,
             size_t candidatesSize = std::min(candidates.size(), size_t(7));
             for (size_t k = 0; k < candidatesSize; ++k) {
                 NJamSpell::TWord candidate = candidates[k];
-                std::string candidateStr = NJamSpell::WideToUTF8(std::wstring(candidate.Ptr, candidate.Len));
+                std::string candidateStr = wide_to_utf8(
+                        std::wstring(candidate.Ptr, candidate.Len)
+                );
                 currentResult["candidates"].push_back(candidateStr);
             }
 
@@ -48,8 +52,10 @@ std::string GetCandidates(const NJamSpell::TSpellCorrector& corrector,
 std::string FixText(const NJamSpell::TSpellCorrector& corrector,
                     const std::string& text)
 {
-    std::wstring input = NJamSpell::UTF8ToWide(text);
-    return NJamSpell::WideToUTF8(corrector.FixFragment(input));
+    NJamSpell::utf8_to_wide_t utf8_to_wide;
+    NJamSpell::wide_to_utf8_t wide_to_utf8;
+    std::wstring input = utf8_to_wide(text);
+    return wide_to_utf8(corrector.FixFragment(input));
 }
 
 int main(int argc, const char** argv) {

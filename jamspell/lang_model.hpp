@@ -1,6 +1,10 @@
 #pragma once
 
-#include <unordered_map>
+#include "tokenizer.hpp"
+#include "perfect_hash.hpp"
+#include "utils.hpp"
+
+#include <array>
 #include <vector>
 #include <utility>
 #include <string>
@@ -8,8 +12,6 @@
 
 #include <contrib/handypack/handypack.hpp>
 #include <contrib/tsl/robin_map.h>
-#include "tokenizer.hpp"
-#include "perfect_hash.hpp"
 
 
 namespace NJamSpell {
@@ -30,12 +32,17 @@ inline constexpr std::underlying_type<TWordId>::type to_underlying(TWordId w)
 
 using TCount = uint32_t;
 
+
+
+/*
 using TGram1Key = TWordId;
 using TGram2Key = std::pair<TWordId, TWordId>;
 using TGram3Key = std::tuple<TWordId, TWordId, TWordId>;
+*/
 using TWordIds = std::vector<TWordId>;
 using TIdSentences = std::vector<TWordIds>;
 
+/*
 struct TGram2KeyHash {
 public:
   std::size_t operator()(const TGram2Key& x) const {
@@ -52,6 +59,8 @@ public:
   }
 };
 
+*/
+
 class TRobinSerializer: public NHandyPack::TUnorderedMapSerializer<
 tsl::robin_map<std::wstring, TWordId>, std::wstring, TWordId> 
 {};
@@ -66,14 +75,30 @@ public:
     }
 };
 
+
 class TLangModel 
 {
     struct TGramLoader ;
+
+    struct train_options_t
+    {
+        std::size_t             max_grams_sz        = 70000000;
+        std::array<unsigned, 4> ngram_thresholds    = {8, 4, 2, 0};
+                        
+        float                   growth_factor       = 1.02;
+
+        static train_options_t make_default();
+    };
+
 public:
 
     using alphabet_type = TTokenizer::alphabet_type;
 
-    bool Train(const std::string& fileName, const std::string& alphabetFile);
+    bool Train(const std::string& fileName
+        , const std::string& alphabetFile
+        , train_options_t const & tr_opt = train_options_t::make_default()
+    );
+
     double Score(const TWords& words) const;
     double Score(std::wstring str) const;
     TWord GetWord(const std::wstring& word) const;

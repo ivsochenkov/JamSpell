@@ -2,6 +2,7 @@
 #include <fstream>
 
 #include "spell_corrector.hpp"
+#include "utils.hpp"
 
 namespace NJamSpell {
 
@@ -39,12 +40,15 @@ static std::vector<std::vector<std::wstring>> GetDeletes2(const std::wstring& w)
     return results;
 }
 
-bool TSpellCorrector::LoadLangModel(const std::string& modelFile) {
-    if (!LangModel.Load(modelFile)) {
+bool TSpellCorrector::LoadLangModel(const std::string& modelFile) 
+{
+    if (!LangModel.Load(modelFile)) 
+    {
         return false;
     }
-    std::string cacheFile = modelFile + ".spell";
-    if (!LoadCache(cacheFile)) {
+    std::string const & cacheFile = modelFile + ".spell";
+    if (!LoadCache(cacheFile)) 
+    {
         PrepareCache();
         SaveCache(cacheFile);
     }
@@ -157,7 +161,10 @@ TWords TSpellCorrector::GetCandidatesRaw(const TWords& sentence, size_t position
     return candidates;
 }
 
-void TSpellCorrector::FilterCandidatesByFrequency(std::unordered_set<TWord, TWordHashPtr>& uniqueCandidates, TWord origWord) const {
+void TSpellCorrector::FilterCandidatesByFrequency(
+    std::unordered_set<TWord, TWordHashPtr>& uniqueCandidates, TWord origWord
+) const 
+{
     if (uniqueCandidates.size() <= MaxCandidatesToCheck) {
         return;
     }
@@ -222,8 +229,6 @@ std::wstring TSpellCorrector::FixFragment(const std::wstring& text) const
         //const TWords& origWords = origSentences[i];
         for (size_t j = 0; j < words.size(); ++j) 
         {
-            //TWord orig = origWords[j];
-            //TWord lowered = words[j];
             TWord const src_word = words[j];
             TWords candidates = GetCandidatesRaw(words, j);
             if (candidates.size() > 0) {
@@ -305,6 +310,8 @@ inline void AddVec(T& target, const T& source) {
 
 TWords TSpellCorrector::Edits(const TWord& word) const 
 {
+    wide_to_utf8_t wide_to_utf8;
+
     std::wstring w(word.Ptr, word.Len);
     TWords result;
 
@@ -317,7 +324,7 @@ TWords TSpellCorrector::Edits(const TWord& word) const
             if (c.Ptr && c.Len) {
                 result.push_back(c);
             }
-            std::string s = WideToUTF8(w);
+            std::string s = wide_to_utf8(w);
             if (Deletes1->Contains(s)) {
                 Inserts(w, result);
             }
@@ -413,18 +420,22 @@ void TSpellCorrector::Inserts(const std::wstring& w, TWords& result) const {
     }
 }
 
-void TSpellCorrector::Inserts2(const std::wstring& w, TWords& result) const {
+void TSpellCorrector::Inserts2(const std::wstring& w, TWords& result) const 
+{
+    wide_to_utf8_t wide_to_utf8;
     for (size_t i = 0; i < w.size() + 1; ++i) {
         for (auto&& ch: LangModel.GetAlphabet()) {
             std::wstring s = w.substr(0, i) + ch + w.substr(i);
-            if (Deletes1->Contains(WideToUTF8(s))) {
+            if (Deletes1->Contains(wide_to_utf8(s))) 
+            {
                 Inserts(s, result);
             }
         }
     }
 }
 
-void TSpellCorrector::PrepareCache() {
+void TSpellCorrector::PrepareCache() 
+{
     auto&& wordToId = LangModel.GetWordToId();
     size_t n = 0;
     size_t s = 0;
@@ -450,13 +461,15 @@ void TSpellCorrector::PrepareCache() {
     uint64_t deletes1real = 0;
     uint64_t deletes2real = 0;
 
+    wide_to_utf8_t wide_to_utf8;
+
     for (auto&& it: wordToId) {
         auto deletes = GetDeletes2(it.first);
         for (auto&& w1: deletes) {
-            Deletes1->Insert(WideToUTF8(w1.back()));
+            Deletes1->Insert(wide_to_utf8(w1.back()));
             deletes1real += 1;
             for (size_t i = 0; i < w1.size() - 1; ++i) {
-                Deletes2->Insert(WideToUTF8(w1[i]));
+                Deletes2->Insert(wide_to_utf8(w1[i]));
                 deletes2real += 1;
             }
         }

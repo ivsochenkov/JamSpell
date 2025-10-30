@@ -1,5 +1,5 @@
 #include <contrib/handypack/handypack.hpp>
-#include <contrib/phf/phf.h>
+
 
 #include "perfect_hash.hpp"
 
@@ -32,24 +32,7 @@ void TPerfectHash::Load(std::istream& in) {
     in.read((char*)perfHash.g, perfHash.r * sizeof(uint32_t));
 }
 
-bool TPerfectHash::Init(const std::vector<std::string>& keys) {
-    std::vector<phf_string_t> keysForPhf;
-    keysForPhf.reserve(keys.size());
-    for (const std::string& s: keys) {
-        keysForPhf.push_back({&s[0], s.size()});
-    }
 
-    phf* tempPhf = new phf();
-    phf_error_t res = PHF::init<phf_string_t, false>(tempPhf, &keysForPhf[0], keysForPhf.size(), 4, 80, 42);
-    if (res != 0) {
-        PHF::destroy(tempPhf);
-        delete tempPhf;
-        return false;
-    }
-    Clear();
-    Phf = tempPhf;
-    return true;
-}
 
 void TPerfectHash::Clear() {
     if (!Phf) {

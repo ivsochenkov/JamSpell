@@ -25,6 +25,7 @@ void SaveFile(const std::string& fileName, const std::string& data) {
     out << data;
 }
 
+/*
 std::wstring UTF8ToWide(const std::string& text) {
 #ifdef USE_BOOST_CONVERT
     using boost::locale::conv::utf_to_utf;
@@ -45,6 +46,7 @@ std::string WideToUTF8(const std::wstring& text) {
     return converter.to_bytes(text);
 #endif
 }
+*/
 
 uint64_t GetCurrentTimeMs() {
     using namespace std::chrono;
@@ -52,20 +54,23 @@ uint64_t GetCurrentTimeMs() {
     return ms.count();
 }
 
-static const std::locale GLocale(std::locale::classic());
+static const std::locale GLocale = std::locale("ru_RU.UTF-8");
 static const std::ctype<wchar_t>& GWctype = std::use_facet<std::ctype<wchar_t>>(GLocale);
 
-void ToLower(std::wstring& text) {
-    std::transform(text.begin(), text.end(), text.begin(), [](wchar_t wch) {
-        return GWctype.tolower(wch);
-    });
+void ToLower(std::wstring& text) 
+{
+    if(!text.empty())
+        GWctype.tolower(text.data(), text.data() + text.size());
 }
 
-wchar_t MakeUpperIfRequired(wchar_t orig, wchar_t sample) {
-    if (GWctype.toupper(sample) == sample) {
-        return GWctype.toupper(orig);
-    }
-    return orig;
+wchar_t MakeLower(wchar_t orig)
+{
+    return GWctype.tolower(orig);
+}
+
+wchar_t MakeUpper(wchar_t orig)
+{
+    return GWctype.toupper(orig);
 }
 
 uint16_t CityHash16(const std::string& str) {

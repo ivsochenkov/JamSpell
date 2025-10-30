@@ -80,6 +80,12 @@
         "format": "cpp",
         "stdfloat": "cpp",
         "text_encoding": "cpp",
-        "cassert": "cpp"
+        "cassert": "cpp",
+        "csignal": "cpp",
+        "strstream": "cpp"
+    },
+    "cmake.configureEnvironment": {
+        "CMAKE_PREFIX_PATH": "/compiled",
+        "CMAKE_INSTALL_PREFIX": "/compiled"
     }
 }
