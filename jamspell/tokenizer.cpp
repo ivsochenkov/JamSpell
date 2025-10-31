@@ -12,18 +12,19 @@
 namespace NJamSpell 
 {
 
-void TTokenizer::AddSentenceIfNeeded(TSentences & sentences, TWords & currSent )
+inline void TTokenizer::AddSentenceIfNeeded(TSentences & sentences, TWords & currSent )
 {
     if(!currSent.empty())
     {
         sentences.emplace_back();
         sentences.back().swap(currSent);
+        currSent.reserve(avg_sent_len_words);
     }
 }
 
 
 
-bool TTokenizer::isSentBreak(token_iterator_type curr_tok_it
+inline bool TTokenizer::isSentBreak(token_iterator_type curr_tok_it
     , token_iterator_type const & e
 ) const
 {
@@ -74,12 +75,15 @@ bool TTokenizer::LoadAlphabet(const std::string& alphabetFile)
 
 TSentences TTokenizer::Tokenize(const std::wstring_view& originalText) const 
 {
-    if (originalText.empty()) {
-        return TSentences {};
+    TSentences sentences;
+    if (originalText.empty()) 
+    {
+        return sentences;
     }
-
-    TSentences sentences;    
+    
+    sentences.reserve(3 + originalText.size() / avg_sent_len_bytes);
     TWords currSentence;
+    currSentence.reserve(avg_sent_len_words);
 
     sep_type sep; 
     tokenizer_impl_type tok(originalText.begin(), originalText.end(), sep);

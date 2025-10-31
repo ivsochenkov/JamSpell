@@ -21,37 +21,8 @@
 #define ssize_t int
 #endif
 
-namespace NJamSpell {
-
-class MemStream: public std::basic_streambuf<char> {
-public:
-    MemStream(char* buff, long maxSize)
-        : Buff(buff)
-        , MaxSize(maxSize)
-        , Pos(0)
-    {
-    }
-
-	std::streamsize xsputn(const char* s, std::streamsize n) override {
-        if (n <= 0) {
-            return n;
-        }
-        long toCopy = std::min<long>(n, MaxSize - Pos);
-        memcpy(Buff + Pos, s, toCopy);
-        Pos += toCopy;
-        return n;
-    }
-    void Reset() {
-        Pos = 0;
-    }
-    long Size() const {
-        return Pos;
-    }
-private:
-    char* Buff;
-    long MaxSize;
-    long Pos;
-};
+namespace NJamSpell 
+{
 
 TLangModel::train_options_t TLangModel::train_options_t::make_default()
 {
@@ -66,10 +37,10 @@ public:
 
     enum class ngram_type : unsigned char 
     {            
-            nGram1 = 0
+            nUndef = 0    
+        ,   nGram1
         ,   nGram2
         ,   nGram3
-        ,   nUndef  
     };
 
     explicit TGramKey (TWordId const & n1 = TWordId::Unknown
@@ -92,45 +63,38 @@ public:
         );
     }
 
-    inline ngram_type kind() const;
+    inline ngram_type kind() const
+    {
+        ngram_type nt {ngram_type::nUndef};
+        for(auto i = m_elems.begin(); i != m_elems.end(); inc(nt, (*i++ != TWordId::Unknown)))
+        {}
+        return nt;
+    }
 
     using const_iterator = storage_type::const_iterator;
 
     const_iterator begin () const {return m_elems.begin();}
-    const_iterator end () const 
+    const_iterator end () const { return begin() + to_underlying(kind()); }
+
+    static std::underlying_type<ngram_type>::type to_underlying(ngram_type nt)
     {
-        for(const_iterator i = m_elems.begin(); i != m_elems.end(); ++i)
-        {
-            if(*i == TWordId::Unknown)
-                return i;
-        }
-        return m_elems.end();
+        return static_cast<std::underlying_type<TGramKey::ngram_type>::type> (nt);
     }
 
 private:
+
+    static void inc(TGramKey::ngram_type & nt, bool v) 
+    {
+        nt = TGramKey::ngram_type( to_underlying(nt) + v );
+    }
+
     storage_type    m_elems;
+
 };
 
 inline std::underlying_type<TGramKey::ngram_type>::type to_underlying(TGramKey::ngram_type nt)
 {
-    return static_cast<std::underlying_type<TGramKey::ngram_type>::type> (nt);
-}
-
-inline TGramKey::ngram_type & operator --(TGramKey::ngram_type & nt)
-{
-    auto u = to_underlying(nt);
-    return (nt = TGramKey::ngram_type( --u ) );
-}
-
-TGramKey::ngram_type TGramKey::kind() const
-{
-    ngram_type nt {ngram_type::nGram3};
-    for(auto i = m_elems.rbegin(); i != m_elems.rend(); ++i, --nt )
-    {
-        if(*i != TWordId::Unknown)
-            return nt;
-    }
-    return ngram_type::nUndef;
+    return TGramKey::to_underlying(nt);
 }
 
 struct TGramKeyHash
@@ -160,6 +124,12 @@ struct TLangModel::TGramLoader
     std::size_t                     trainText_size
                                 ,   sentences_size
                                 ;
+
+    unsigned get_threshold(TGramKey::ngram_type ngr_kind) const 
+    { 
+        assert (ngr_kind != TGramKey::ngram_type::nUndef);
+        return m_tr_opt.ngram_thresholds[ to_underlying(ngr_kind) - 1 ];
+    }
 
     explicit TGramLoader(TLangModel & lm, train_options_t const & tr_opt)
     : LM(lm)
@@ -256,7 +226,7 @@ private:
         ) 
         {
             TGramKey::ngram_type const nt = it -> first.kind();
-            if (it -> second >= m_tr_opt.ngram_thresholds[ to_underlying(nt) ])
+            if (it -> second >= get_threshold(nt))
             {
                 ++it;
                 //stat.inc_left(nt);
@@ -317,23 +287,6 @@ private:
 
 };
 
-/*
-template<typename T>
-std::string DumpKey(const T& key) {
-    std::stringbuf buf;
-    std::ostream out(&buf);
-    NHandyPack::Dump(out, key);
-    return buf.str();
-}
-
-
-template<typename T>
-void PrepareNgramKeys(const T& grams, std::vector<std::string>& keys) {
-    for (auto&& it: grams) {
-        keys.push_back(DumpKey(it.first));
-    }
-}
-*/
 static const uint32_t MAX_REAL_NUM = 268435456;
 static const uint32_t MAX_AVAILABLE_NUM = 65536;
 
@@ -580,7 +533,8 @@ uint64_t TLangModel::GetCheckSum() const {
     return CheckSum;
 }
 
-TWord TLangModel::GetWord(const std::wstring& word) const {
+TWord TLangModel::GetWord(const std::wstring_view& word) const 
+{
     auto it = WordToId.find(word);
     if (it != WordToId.end()) {
         return TWord(&it->first[0], it->first.size());

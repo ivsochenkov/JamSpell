@@ -70,7 +70,10 @@ bool TSpellCorrector::TrainLangModel(const std::string& textFile, const std::str
     return true;
 }
 
-TScoredWords TSpellCorrector::GetCandidatesRawWithScores(const TWords& sentence, size_t position) const {
+TScoredWords TSpellCorrector::GetCandidatesRawWithScores(const TWords& sentence
+    , size_t position
+) const 
+{
     TScoredWords scoredCandidates;
 
     if (position >= sentence.size()) {
@@ -82,7 +85,8 @@ TScoredWords TSpellCorrector::GetCandidatesRawWithScores(const TWords& sentence,
 
     bool firstLevel = true;
     bool knownWord = false;
-    if (candidates.empty()) {
+    if (candidates.empty()) 
+    {
         candidates = Edits(w);
         firstLevel = false;
     }
@@ -92,8 +96,9 @@ TScoredWords TSpellCorrector::GetCandidatesRawWithScores(const TWords& sentence,
     }
 
     {
-        TWord c = LangModel.GetWord(std::wstring(w.Ptr, w.Len));
-        if (c.Ptr && c.Len) {
+        TWord c = LangModel.GetWord(std::wstring_view(w.Ptr, w.Len));
+        if (c) 
+        {
             w = c;
             candidates.push_back(c);
             knownWord = true;
@@ -151,14 +156,31 @@ bool TSpellCorrector::WordIsKnown(const std::wstring& word) const {
 }
 
 TWords TSpellCorrector::GetCandidatesRaw(const TWords& sentence, size_t position) const 
-{
-    TWords candidates;
-    TScoredWords scoredCandidates = GetCandidatesRawWithScores(sentence, position);
-
-    for (auto s: scoredCandidates) {
-        candidates.push_back(s.Word);
+{    
+    TScoredWords const & scoredCandidates = GetCandidatesRawWithScores(sentence, position);
+    TWords candidates(scoredCandidates.size());
+    TWords::iterator i = candidates.begin();
+    for (auto s: scoredCandidates) 
+    {
+        *i++ = s.Word;
     }
     return candidates;
+}
+
+void TSpellCorrector::AppendWithCase(std::wstring & result
+    , std::wstring_view const & origWord
+    , std::wstring_view const &newWord
+) const
+{
+    std::size_t const pos {result.size()};
+    result.append(newWord);
+
+    for (size_t k = 0; k < newWord.size(); ++k) 
+    {
+        wchar_t const origChar = (k < origWord.size()) ? origWord[k] : origWord.back() ;
+        wchar_t & newChar = result[pos + k];
+        newChar = MakeUpperIfRequired(newChar, origChar);
+    }
 }
 
 void TSpellCorrector::FilterCandidatesByFrequency(
@@ -202,7 +224,9 @@ std::vector<std::pair<std::wstring,double> > TSpellCorrector::GetCandidatesWithS
     return results;
 }
 
-std::vector<std::wstring> TSpellCorrector::GetCandidates(const std::vector<std::wstring>& sentence, size_t position) const {
+std::vector<std::wstring> 
+TSpellCorrector::GetCandidates(const std::vector<std::wstring>& sentence, size_t position) const 
+{
     TWords words;
     for (auto&& w: sentence) {
         words.push_back(TWord(w));
@@ -217,39 +241,39 @@ std::vector<std::wstring> TSpellCorrector::GetCandidates(const std::vector<std::
 
 std::wstring TSpellCorrector::FixFragment(const std::wstring& text) const 
 {
+    std::wstring_view const orig_txt(text);
     std::wstring in_txt = text;
     TSentences sentences = LangModel.Tokenize(in_txt);
     ToLower(in_txt);
 
     std::wstring result;
+    result.reserve(text.size() * 1.1);
+
     size_t origPos = 0;
-    for (size_t i = 0; i < sentences.size(); ++i) 
+    //for (size_t i = 0; i < sentences.size(); ++i) 
+    for (TWords & words : sentences)
     {
-        TWords words = sentences[i];
-        //const TWords& origWords = origSentences[i];
+        //TWords words = sentences[i];
         for (size_t j = 0; j < words.size(); ++j) 
         {
-            TWord const src_word = words[j];
-            TWords candidates = GetCandidatesRaw(words, j);
-            if (candidates.size() > 0) {
-                words[j] = candidates[0];
+            TWord & curr_word = words[j];
+            TWord const src_word = curr_word; // store copy of orig word!
+            //TWords candidates = GetCandidatesRaw(words, j);
+            auto const & candidates = GetCandidatesRawWithScores(words, j);
+            if (!candidates.empty()) 
+            {
+                curr_word = candidates.front().Word;
             }
             size_t const currOrigPos = getOffset(src_word.Ptr, in_txt);
-            result += std::wstring_view(text).substr(origPos, currOrigPos - origPos);
+            result += orig_txt.substr(origPos, currOrigPos - origPos);
             origPos = currOrigPos;
             
-            std::wstring_view newWord(words[j].Ptr, words[j].Len);
-            std::wstring_view origWord(getOrigWord(text, currOrigPos, src_word.Len));
+            std::wstring_view const newWord(curr_word.Ptr, curr_word.Len);
+            std::wstring_view const & origWord(getOrigWord(text, currOrigPos, src_word.Len));
 
             if (newWord != std::wstring_view{src_word.Ptr, src_word.Len}) 
             {
-                for (size_t k = 0; k < newWord.size(); ++k) 
-                {
-                    size_t n = k < origWord.size() ? k : origWord.size() - 1;
-                    wchar_t newChar = newWord[k];
-                    wchar_t origChar = origWord[n];
-                    result.push_back(MakeUpperIfRequired(newChar, origChar));
-                }
+                AppendWithCase(result, origWord, newWord);           
             } 
             else 
             {
@@ -258,7 +282,7 @@ std::wstring TSpellCorrector::FixFragment(const std::wstring& text) const
             origPos += src_word.Len;
         }
     }
-    result += std::wstring_view(text).substr(origPos, text.size() - origPos);
+    result += orig_txt.substr(origPos, text.size() - origPos);
     return result;
 }
 
@@ -318,8 +342,10 @@ TWords TSpellCorrector::Edits(const TWord& word) const
     std::vector<std::vector<std::wstring>> cands = GetDeletes2(w);
     cands.push_back(std::vector<std::wstring>({w}));
 
-    for (auto&& w1: cands) {
-        for (auto&& w: w1) {
+    for (auto&& w1: cands) 
+    {
+        for (auto&& w: w1) 
+        {
             TWord c = LangModel.GetWord(w);
             if (c.Ptr && c.Len) {
                 result.push_back(c);

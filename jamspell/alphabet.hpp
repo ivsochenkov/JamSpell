@@ -3,6 +3,7 @@
 #include "utils.hpp"
 
 #include <boost/iterator/transform_iterator.hpp>
+#include <boost/range/iterator_range.hpp>
 
 #include <contrib/handypack/handypack.hpp>
 
@@ -19,8 +20,29 @@ class TAlphabet
 {    
 public:
 
-    using letters_type = std::vector<wchar_t>;
+    static constexpr std::size_t    max_size = 254;
+
+    using letter_type = wchar_t;
+
+    using letters_type = std::vector<letter_type>;
     using substitutes_type = std::vector<letters_type>;
+
+    struct switch_t
+    {
+        letter_type switched, real;
+
+        explicit switch_t(letter_type const s = 0, letter_type const r = 0)
+        : switched{s}, real{r}
+        {}
+
+        HANDYPACK(switched, real);
+
+        bool operator < (switch_t const & rhs) const
+        { return switched < switched; }
+
+        bool operator == (switch_t const & rhs) const
+        { return switched == switched; }
+    };
 
     enum class pos_t : unsigned char 
     { 
@@ -36,44 +58,52 @@ private:
     {
         letter_info_t () = default;
 
-        explicit letter_info_t (wchar_t const l, pos_t const p = pos_t::Undefined)
+        explicit letter_info_t (letter_type const l, pos_t const p = pos_t::Undefined)
         : m_letter{l}, m_pos{p} 
         {} 
 
-        bool operator < (TAlphabet::letter_info_t const & rhs) const
+        bool operator < (letter_info_t const & rhs) const
         { return m_letter < rhs.m_letter; }
 
-        wchar_t             m_letter = 0;        
+        bool operator == (letter_info_t const & rhs) const
+        { return m_letter == rhs.m_letter; }
+
+        letter_type         m_letter = 0;        
         pos_t               m_pos = pos_t::Undefined;
 
         HANDYPACK(m_letter, m_pos);
     };
 
+    void Reserve();
+
 public:
 
-    HANDYPACK(m_letters, m_substitites)
+    HANDYPACK(m_letters, m_switches, m_subst)
 
     void Clear() ;
 
     bool LoadFromFile (std::string const & fPath);
 
-    char Wch2Ch (wchar_t const ch) const 
+    char Wch2Ch (letter_type const ch) const 
     {return static_cast<char>(GetPos(ch)) + 1 ; }
 
-    wchar_t Ch2Wch (char const ch) const 
+    letter_type Ch2Wch (char const ch) const 
     {return m_letters[raw_pos(pos_t(ch - 1))].m_letter; }
 
-    letters_type const & GetSubstitutes (wchar_t const ch) const ;
+    letters_type const & GetSubstitutes (letter_type const ch) const ;
 
-    bool Contains(wchar_t const ch) const {return GetPos(ch) != pos_t::Undefined;}
+    bool Contains(letter_type const ch) const {return GetPos(ch) != pos_t::Undefined;}
 
 private:
 
-    void LoadSubst (letters_type & sbst, std::wstring_view lttrs);
+    void LoadPunto (letter_type const chr, std::wstring_view const & switched_letters);
 
-    pos_t GetPos (wchar_t const ch) const;
+    void LoadSubst (letters_type & sbst, std::wstring_view const & lttrs);
+
+    pos_t GetPos (letter_type const ch) const;
 
     using impl_type = std::vector<letter_info_t>;
+    using punto_switch_type = std::vector<switch_t>;
 
     struct trnsfrm_t
     {
@@ -92,10 +122,17 @@ public:
     const_iterator begin() const {return const_iterator(m_letters.begin(), trnsfrm_t{});}
     const_iterator end() const {return const_iterator(m_letters.end(), trnsfrm_t{});}
 
+    using switch_const_iterator = punto_switch_type::const_iterator;
+    using switch_range_type = boost::iterator_range<switch_const_iterator>;
+    
+    switch_range_type get_switches (letter_type const wch) const
+    { return std::equal_range(m_switches.begin(), m_switches.end(), switch_t{wch, 0});}
+
 private:
 
     impl_type           m_letters;
-    substitutes_type    m_substitites;
+    punto_switch_type   m_switches;
+    substitutes_type    m_subst;
 
 };
 

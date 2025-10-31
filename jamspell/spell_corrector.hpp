@@ -23,7 +23,17 @@ public:
     void SetMaxCandidatesToCheck(size_t maxCandidatesToCheck);
     const NJamSpell::TLangModel& GetLangModel() const;
 private:
-    void FilterCandidatesByFrequency(std::unordered_set<NJamSpell::TWord, NJamSpell::TWordHashPtr>& uniqueCandidates, NJamSpell::TWord origWord) const;
+    
+    void AppendWithCase(std::wstring & result
+        , std::wstring_view const & origWord
+        , std::wstring_view const &newWord
+    ) const;
+
+    void FilterCandidatesByFrequency(
+            std::unordered_set<NJamSpell::TWord, NJamSpell::TWordHashPtr>& 
+            uniqueCandidates, NJamSpell::TWord origWord
+    ) const;
+
     NJamSpell::TWords Edits(const NJamSpell::TWord& word) const;
     NJamSpell::TWords Edits2(const NJamSpell::TWord& word, bool lastLevel = true) const;
     void Inserts(const std::wstring& w, NJamSpell::TWords& result) const;
@@ -32,6 +42,7 @@ private:
     bool LoadCache(const std::string& cacheFile);
     bool SaveCache(const std::string& cacheFile);
 private:
+
     TLangModel LangModel;
     std::unique_ptr<TBloomFilter> Deletes1;
     std::unique_ptr<TBloomFilter> Deletes2;

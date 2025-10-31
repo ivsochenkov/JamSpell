@@ -58,6 +58,10 @@ public:
 
     using alphabet_type = TAlphabet;
 
+    static constexpr std::size_t        avg_sent_len_bytes = 37
+                                    ,   avg_sent_len_words = 17
+                                    ;
+
     TTokenizer();
     bool LoadAlphabet(const std::string& alphabetFile);
     TSentences Tokenize(const std::wstring_view& originalText) const;

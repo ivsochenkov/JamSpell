@@ -32,45 +32,38 @@ inline constexpr std::underlying_type<TWordId>::type to_underlying(TWordId w)
 
 using TCount = uint32_t;
 
-
-
-/*
-using TGram1Key = TWordId;
-using TGram2Key = std::pair<TWordId, TWordId>;
-using TGram3Key = std::tuple<TWordId, TWordId, TWordId>;
-*/
 using TWordIds = std::vector<TWordId>;
 using TIdSentences = std::vector<TWordIds>;
 
-/*
-struct TGram2KeyHash {
-public:
-  std::size_t operator()(const TGram2Key& x) const {
-      return (size_t)x.first ^ ((size_t)x.second << 16);
-  }
+struct wstr_hash_t
+{
+    std::size_t operator () (std::wstring_view const & w) const
+    {
+        static std::hash<std::wstring_view > hasher{};
+        return hasher(w); 
+    }
 };
 
-struct TGram3KeyHash {
-public:
-  std::size_t operator()(const TGram3Key& x) const {
-    return (size_t)std::get<0>(x) ^
-            ((size_t)std::get<1>(x) << 16) ^
-            ((size_t)std::get<2>(x) << 32);
-  }
-};
-
-*/
+using wstr_to_id_map_t = tsl::robin_map<std::wstring, TWordId
+        , wstr_hash_t
+        , std::equal_to<void> //wstr_equal_t
+        , std::allocator<std::pair<std::wstring, TWordId> >
+        , true // store hash
+        , tsl::rh::mod_growth_policy<std::ratio<11, 10> >
+    >;
 
 class TRobinSerializer: public NHandyPack::TUnorderedMapSerializer<
-tsl::robin_map<std::wstring, TWordId>, std::wstring, TWordId> 
+    wstr_to_id_map_t, std::wstring, TWordId
+> 
 {};
 
-class TRobinHash: public tsl::robin_map<std::wstring, TWordId> {
+class TRobinHash: public wstr_to_id_map_t 
+{
 public:
-    inline virtual void Dump(std::ostream& out) const {
+    virtual void Dump(std::ostream& out) const {
         TRobinSerializer::Dump(out, *this);
     }
-    inline virtual void Load(std::istream& in) {
+    virtual void Load(std::istream& in) {
         TRobinSerializer::Load(in, *this);
     }
 };
@@ -83,7 +76,7 @@ class TLangModel
     struct train_options_t
     {
         std::size_t             max_grams_sz        = 70000000;
-        std::array<unsigned, 4> ngram_thresholds    = {8, 4, 2, 0};
+        std::array<unsigned, 4> ngram_thresholds    = {8, 4, 2};
                         
         float                   growth_factor       = 1.02;
 
@@ -101,7 +94,9 @@ public:
 
     double Score(const TWords& words) const;
     double Score(std::wstring str) const;
-    TWord GetWord(const std::wstring& word) const;
+
+    TWord GetWord(const std::wstring_view& word) const;
+
     alphabet_type const & GetAlphabet() const { return Tokenizer.GetAlphabet();}
     TSentences Tokenize(const std::wstring& text) const;
 
