@@ -38,6 +38,7 @@ struct TWord {
         return (Ptr == other.Ptr && Len == other.Len);
     }
 
+    bool empty () const { return !Len; }
     explicit operator bool () const {return Ptr != nullptr;}
 
     const wchar_t* Ptr = nullptr;

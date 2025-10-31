@@ -5,24 +5,50 @@
 #include "lang_model.hpp"
 #include "bloom_filter.hpp"
 
-namespace NJamSpell {
+namespace NJamSpell 
+{
 
 
-class TSpellCorrector {
+class TSpellCorrector 
+{
+
 public:
+
+    static constexpr std::size_t word_cand_list_size_default = 11;
+
     bool LoadLangModel(const std::string& modelFile);
-    bool TrainLangModel(const std::string& textFile, const std::string& alphabetFile, const std::string& modelFile);
-    bool WordIsKnown(const std::wstring& word) const;
-    NJamSpell::TScoredWords GetCandidatesRawWithScores(const NJamSpell::TWords& sentence, size_t position) const;
-    NJamSpell::TWords GetCandidatesRaw(const NJamSpell::TWords& sentence, size_t position) const;
-    std::vector<std::wstring> GetCandidates(const std::vector<std::wstring>& sentence, size_t position) const;
-    std::vector<std::pair<std::wstring,double> > GetCandidatesWithScores(const std::vector<std::wstring>& sentence, size_t position) const;
+    
+    bool TrainLangModel(const std::string& textFile
+        , const std::string& alphabetFile
+        , const std::string& modelFile
+    );
+
+    bool WordIsKnown(const std::wstring_view& word) const;
+    
+    TScoredWords GetCandidatesRawWithScores(const TWords& sentence
+        , size_t const position
+    ) const;
+
+    TWords GetCandidatesRaw(const TWords& sentence, size_t const position) const;
+
+    std::vector<std::wstring> GetCandidates(const std::vector<std::wstring>& sentence
+        , size_t const position
+    ) const;
+
+    std::vector<std::pair<std::wstring,double> > GetCandidatesWithScores(
+        const std::vector<std::wstring>& sentence
+        , size_t const position
+    ) const;
+    
     std::wstring FixFragment(const std::wstring& text) const;
     std::wstring FixFragmentNormalized(const std::wstring& text) const;
+    
     void SetPenalty(double knownWordsPenalty, double unknownWordsPenalty);
     void SetMaxCandidatesToCheck(size_t maxCandidatesToCheck);
+    
     const NJamSpell::TLangModel& GetLangModel() const;
-private:
+
+    private:
     
     void AppendWithCase(std::wstring & result
         , std::wstring_view const & origWord
@@ -30,8 +56,14 @@ private:
     ) const;
 
     void FilterCandidatesByFrequency(
-            std::unordered_set<NJamSpell::TWord, NJamSpell::TWordHashPtr>& 
-            uniqueCandidates, NJamSpell::TWord origWord
+            std::unordered_set<TWord, TWordHashPtr>& uniqueCandidates
+            , TWord origWord
+    ) const;
+
+    std::wstring PuntoSwitcher(TWord const &w) const;
+
+    NJamSpell::TWords FormEditsCandidates(const NJamSpell::TWord& word
+        , bool & firstLevel
     ) const;
 
     NJamSpell::TWords Edits(const NJamSpell::TWord& word) const;

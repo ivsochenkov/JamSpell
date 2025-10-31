@@ -6,7 +6,7 @@
 
 namespace NJamSpell {
 
-inline std::size_t getOffset(wchar_t const * pos, std::wstring const & src)
+inline std::size_t getOffset(wchar_t const * pos, std::wstring_view const & src)
 {
     return std::distance(&src[0], pos);
 }
@@ -16,22 +16,40 @@ inline std::wstring_view getOrigWord(std::wstring const &text, std::size_t pos, 
     return std::wstring_view(text).substr(pos, len);
 }
 
-static std::vector<std::wstring> GetDeletes1(const std::wstring& w) {
+static std::vector<std::wstring> GetDeletes1(const std::wstring_view& w) 
+{
     std::vector<std::wstring> results;
-    for (size_t i = 0; i < w.size(); ++i) {
-        auto nw = w.substr(0, i) + w.substr(i+1);
-        if (!nw.empty()) {
-            results.push_back(std::move(nw));
-        }
+    if(w.size() < 2)        // one-letter candidates? hmmmm
+        return results;
+
+    results.reserve(w.size());
+    for (size_t i = 0; i < w.size(); ++i) 
+    {
+        std::wstring nw;
+        nw.reserve(w.size());
+        nw.append(w.substr(0, i)).append (w.substr(i+1));
+        results.push_back(std::move(nw));
+        // if (!nw.empty()) {
+        //     results.push_back(std::move(nw));
+        // }
     }
     return results;
 }
 
-static std::vector<std::vector<std::wstring>> GetDeletes2(const std::wstring& w) {
-    std::vector<std::vector<std::wstring>> results;
-    for (size_t i = 0; i < w.size(); ++i) {
-        auto nw = w.substr(0, i) + w.substr(i+1);
-        if (!nw.empty()) {
+static std::vector<std::vector<std::wstring>> GetDeletes2(const std::wstring_view & w) 
+{
+    std::vector<std::vector<std::wstring> > results;
+    if(w.size() < 3) // one letter candiates... Hmmm?
+        return results;
+
+    results.reserve(w.size());
+    for (size_t i = 0; i < w.size(); ++i) 
+    {
+        std::wstring nw;
+        nw.reserve(w.size());
+        (nw += w.substr(0, i)) += w.substr( i+1 );
+        //if (!nw.empty()) 
+        {
             std::vector<std::wstring> currResults = GetDeletes1(nw);
             currResults.push_back(std::move(nw));
             results.push_back(std::move(currResults));
@@ -55,7 +73,11 @@ bool TSpellCorrector::LoadLangModel(const std::string& modelFile)
     return true;
 }
 
-bool TSpellCorrector::TrainLangModel(const std::string& textFile, const std::string& alphabetFile, const std::string& modelFile) {
+bool TSpellCorrector::TrainLangModel(const std::string& textFile
+    , const std::string& alphabetFile
+    , const std::string& modelFile
+) 
+{
     if (!LangModel.Train(textFile, alphabetFile)) {
         return false;
     }
@@ -71,32 +93,38 @@ bool TSpellCorrector::TrainLangModel(const std::string& textFile, const std::str
 }
 
 TScoredWords TSpellCorrector::GetCandidatesRawWithScores(const TWords& sentence
-    , size_t position
+    , size_t const position
 ) const 
 {
     TScoredWords scoredCandidates;
 
-    if (position >= sentence.size()) {
+    if (position >= sentence.size()) 
+    {
         return scoredCandidates;
     }
 
     TWord w = sentence[position];
-    TWords candidates = Edits2(w);
-
-    bool firstLevel = true;
-    bool knownWord = false;
-    if (candidates.empty()) 
+    bool firstLevel = true, swFirstLevel = true;
+    TWords candidates = FormEditsCandidates(w, firstLevel);
+    TWords sw_candidates; 
     {
-        candidates = Edits(w);
-        firstLevel = false;
+        std::wstring switched_word = PuntoSwitcher(w);
+        if(!switched_word.empty())
+        {
+            sw_candidates = FormEditsCandidates(switched_word, firstLevel); // Todo
+            sw_candidates.push_back(std::move(switched_word));
+        }
     }
 
-    if (candidates.empty()) {
+    if(candidates.empty()) // TODO - process separetely
+    {
         return scoredCandidates;
     }
 
+    bool knownWord = false;
     {
         TWord c = LangModel.GetWord(std::wstring_view(w.Ptr, w.Len));
+        /*  // WTF?
         if (c) 
         {
             w = c;
@@ -105,16 +133,27 @@ TScoredWords TSpellCorrector::GetCandidatesRawWithScores(const TWords& sentence
         } else {
             candidates.push_back(w);
         }
+        */
+        if (c)
+        {
+            w = c;
+            knownWord = true;
+        }
+        candidates.push_back(w);
     }
 
-    std::unordered_set<TWord, TWordHashPtr> uniqueCandidates(candidates.begin(), candidates.end());
+    std::unordered_set<TWord, TWordHashPtr> uniqueCandidates(
+        candidates.begin(), candidates.end()
+    );
 
     FilterCandidatesByFrequency(uniqueCandidates, w);
     scoredCandidates.reserve(uniqueCandidates.size());
 
-    for (TWord cand: uniqueCandidates) {
+    for (TWord cand: uniqueCandidates) 
+    {
         TWords candSentence;
-        for (size_t i = 0; i < sentence.size(); ++i) {
+        for (size_t i = 0; i < sentence.size(); ++i) 
+        {
             if (i == position) {
                 candSentence.push_back(cand);
             } else if ((i < position && i + 2 >= position) ||
@@ -127,35 +166,38 @@ TScoredWords TSpellCorrector::GetCandidatesRawWithScores(const TWords& sentence
         TScoredWord scored;
         scored.Word = cand;
         scored.Score = LangModel.Score(candSentence);
-        if (!(scored.Word == w)) {
-            if (knownWord) {
-                if (firstLevel) {
+        if (!(scored.Word == w)) 
+        {
+            if (knownWord) 
+            {
+                if (firstLevel) 
+                {
                     scored.Score -= KnownWordsPenalty;
                 } else {
                     scored.Score *= 50.0;
                 }
-            } else {
+            } else 
+            {
                 scored.Score -= UnknownWordsPenalty;
             }
         }
         scoredCandidates.push_back(scored);
     }
 
-    std::sort(scoredCandidates.begin(), scoredCandidates.end(), [](TScoredWord w1, TScoredWord w2) {
-        return w1.Score > w2.Score;
-    });
+    std::sort(scoredCandidates.begin(), scoredCandidates.end()
+        , [](TScoredWord w1, TScoredWord w2) { return w1.Score > w2.Score;}
+    );
     return scoredCandidates;
 }
 
-bool TSpellCorrector::WordIsKnown(const std::wstring& word) const {
-    TWord w = LangModel.GetWord(word);
-    if (w.Ptr && w.Len) {
-        return true;
-    }
-    return false;
+bool TSpellCorrector::WordIsKnown(const std::wstring_view& word) const 
+{
+    return !LangModel.GetWord(word).empty();
 }
 
-TWords TSpellCorrector::GetCandidatesRaw(const TWords& sentence, size_t position) const 
+TWords TSpellCorrector::GetCandidatesRaw(const TWords& sentence
+    , size_t const position
+) const 
 {    
     TScoredWords const & scoredCandidates = GetCandidatesRawWithScores(sentence, position);
     TWords candidates(scoredCandidates.size());
@@ -184,7 +226,8 @@ void TSpellCorrector::AppendWithCase(std::wstring & result
 }
 
 void TSpellCorrector::FilterCandidatesByFrequency(
-    std::unordered_set<TWord, TWordHashPtr>& uniqueCandidates, TWord origWord
+      std::unordered_set<TWord, TWordHashPtr>& uniqueCandidates
+    , TWord origWord
 ) const 
 {
     if (uniqueCandidates.size() <= MaxCandidatesToCheck) {
@@ -198,8 +241,9 @@ void TSpellCorrector::FilterCandidatesByFrequency(
         candidateCounts.push_back(std::make_pair(cnt, c));
     }
     uniqueCandidates.clear();
-    std::stable_sort(candidateCounts.begin(), candidateCounts.end(), [](const TCountCand& a, const TCountCand& b) {
-        return a.first > b.first;
+    std::stable_sort(candidateCounts.begin(), candidateCounts.end()
+        , [](const TCountCand& a, const TCountCand& b) {
+            return a.first > b.first;
     });
 
     for (size_t i = 0; i < MaxCandidatesToCheck; ++ i) {
@@ -208,34 +252,38 @@ void TSpellCorrector::FilterCandidatesByFrequency(
     uniqueCandidates.insert(origWord);
 }
 
-std::vector<std::pair<std::wstring,double> > TSpellCorrector::GetCandidatesWithScores(
+std::vector<std::pair<std::wstring,double> > 
+TSpellCorrector::GetCandidatesWithScores(
     const std::vector<std::wstring>& sentence,
-    size_t position
+    size_t const position
 ) const 
 {
 
-    TWords words(sentence.begin(), sentence.end());
-    TScoredWords scoredCandidates = GetCandidatesRawWithScores(words, position);
+    TWords const words(sentence.begin(), sentence.end());
+    TScoredWords const & scoredCandidates = GetCandidatesRawWithScores(words, position);
 
-    std::vector<std::pair<std::wstring,double> > results;
-    for (auto s: scoredCandidates) {
-        std::wstring word = std::wstring(s.Word.Ptr, s.Word.Len);
-        results.push_back(std::make_pair(word, s.Score));
+    std::vector<std::pair<std::wstring,double> > results (scoredCandidates.size());
+    auto it = results.begin();
+    for (auto s: scoredCandidates) 
+    {
+        *it++ = std::make_pair(std::wstring(s.Word.Ptr, s.Word.Len), s.Score);
     }
     return results;
 }
 
 std::vector<std::wstring> 
-TSpellCorrector::GetCandidates(const std::vector<std::wstring>& sentence, size_t position) const 
+TSpellCorrector::GetCandidates(const std::vector<std::wstring>& sentence
+    , size_t const position
+) const 
 {
-    TWords words;
-    for (auto&& w: sentence) {
-        words.push_back(TWord(w));
-    }
-    TWords candidates = GetCandidatesRaw(words, position);
-    std::vector<std::wstring> results;
-    for (auto&& c: candidates) {
-        results.push_back(std::wstring(c.Ptr, c.Len));
+    TWords words(sentence.begin(), sentence.end());
+
+    TWords const & candidates = GetCandidatesRaw(words, position);
+    std::vector<std::wstring> results(candidates.size());
+    auto it = results.begin();
+    for (auto&& c: candidates) 
+    {
+        (it++) -> assign (c.Ptr, c.Len);
     }
     return results;
 }
@@ -248,24 +296,22 @@ std::wstring TSpellCorrector::FixFragment(const std::wstring& text) const
     ToLower(in_txt);
 
     std::wstring result;
-    result.reserve(text.size() * 1.1);
+    result.reserve(text.size() * 1.1 + 7);
 
     size_t origPos = 0;
-    //for (size_t i = 0; i < sentences.size(); ++i) 
     for (TWords & words : sentences)
     {
-        //TWords words = sentences[i];
         for (size_t j = 0; j < words.size(); ++j) 
         {
             TWord & curr_word = words[j];
             TWord const src_word = curr_word; // store copy of orig word!
-            //TWords candidates = GetCandidatesRaw(words, j);
             auto const & candidates = GetCandidatesRawWithScores(words, j);
             if (!candidates.empty()) 
             {
                 curr_word = candidates.front().Word;
             }
-            size_t const currOrigPos = getOffset(src_word.Ptr, in_txt);
+            size_t const currOrigPos 
+                = getOffset(src_word.Ptr, in_txt); // tokenized lowered text
             result += orig_txt.substr(origPos, currOrigPos - origPos);
             origPos = currOrigPos;
             
@@ -333,6 +379,31 @@ inline void AddVec(T& target, const T& source) {
     target.insert(target.end(), source.begin(), source.end());
 }
 
+std::wstring TSpellCorrector::PuntoSwitcher(TWord const &w) const
+{
+    std::wstring_view const ww(w.Ptr, w.Len); 
+    std::wstring s = FribbulusXax(LangModel.GetAlphabet(), ww);
+    if(s == ww)
+    {
+        s = std::wstring{};
+    }
+    return s;
+}
+
+TWords TSpellCorrector::FormEditsCandidates(const NJamSpell::TWord& word
+    , bool & firstLevel
+) const
+{
+    TWords candidates = Edits2(word);
+    firstLevel = true;
+    if (candidates.empty()) 
+    {
+        candidates = Edits(word);
+        firstLevel = false;
+    }
+    return candidates; 
+}
+
 TWords TSpellCorrector::Edits(const TWord& word) const 
 {
     wide_to_utf8_t wide_to_utf8;
@@ -366,36 +437,46 @@ TWords TSpellCorrector::Edits(const TWord& word) const
 
 TWords TSpellCorrector::Edits2(const TWord& word, bool lastLevel) const 
 {
-    std::wstring const w(word.Ptr, word.Len);
+    std::wstring_view const w(word.Ptr, word.Len);
     TWords result;
+    result.reserve(word_cand_list_size_default);
 
-    for (size_t i = 0; i < w.size() + 1; ++i) {
+    for (size_t i = 0; i < w.size() + 1; ++i) 
+    {
         // delete
         if (i < w.size()) 
         {
-            std::wstring s = w.substr(0, i) + w.substr(i+1);
+            std::wstring s;
+            s.reserve(w.size()); 
+            (s += w.substr(0, i)) += w.substr(i+1);
             TWord c = LangModel.GetWord(s);
-            if (c.Ptr && c.Len) {
+            if (c) 
+            {
                 result.push_back(c);
             }
-            if (!lastLevel) {
+            if (!lastLevel) 
+            {
                 AddVec(result, Edits2(TWord(s)));
             }
         }
 
         // transpose
-        if (i + 1 < w.size()) {
-            std::wstring s = w.substr(0, i);
-            s += w.substr(i + 1, 1);
-            s += w.substr(i, 1);
-            if (i + 2 < w.size()) {
+        if (i + 1 < w.size()) 
+        {
+            std::wstring s;
+            s.reserve(w.size());
+            ((s += w.substr(0, i)) += w[i + 1]) += w[i];
+            if (i + 2 < w.size()) 
+            {
                 s += w.substr(i+2);
             }
             TWord c = LangModel.GetWord(s);
-            if (c.Ptr && c.Len) {
+            if (c) 
+            {
                 result.push_back(c);
             }
-            if (!lastLevel) {
+            if (!lastLevel) 
+            {
                 AddVec(result, Edits2(TWord(s)));
             }
         }
@@ -406,12 +487,16 @@ TWords TSpellCorrector::Edits2(const TWord& word, bool lastLevel) const
             TAlphabet::letters_type const & sbt = LangModel.GetAlphabet().GetSubstitutes(w[i]);
             for (auto&& ch: sbt) 
             {
-                std::wstring s = w.substr(0, i) + ch + w.substr(i+1);
+                std::wstring s;
+                s.reserve(w.size());
+                ((s += w.substr(0, i)) += ch) += w.substr(i+1);
                 TWord c = LangModel.GetWord(s);
-                if (c.Ptr && c.Len) {
+                if (c) 
+                {
                     result.push_back(c);
                 }
-                if (!lastLevel) {
+                if (!lastLevel) 
+                {
                     AddVec(result, Edits2(TWord(s)));
                 }
             }
@@ -419,13 +504,18 @@ TWords TSpellCorrector::Edits2(const TWord& word, bool lastLevel) const
 
         // inserts
         {
-            for (auto&& ch: LangModel.GetAlphabet()) {
-                std::wstring s = w.substr(0, i) + ch + w.substr(i);
+            for (auto&& ch: LangModel.GetAlphabet()) 
+            {
+                std::wstring s;
+                s.reserve(w.size() + 1u);
+                ((s += w.substr(0, i)) += ch) += w.substr(i);
                 TWord c = LangModel.GetWord(s);
-                if (c.Ptr && c.Len) {
+                if (c) 
+                {
                     result.push_back(c);
                 }
-                if (!lastLevel) {
+                if (!lastLevel) 
+                {
                     AddVec(result, Edits2(TWord(s)));
                 }
             }

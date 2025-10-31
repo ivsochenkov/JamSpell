@@ -543,7 +543,7 @@ TWord TLangModel::GetWord(const std::wstring_view& word) const
 {
     auto it = WordToId.find(word);
     if (it != WordToId.end()) {
-        return TWord(&it->first[0], it->first.size());
+        return TWord(it->first.data(), it->first.size());
     }
     return TWord();
 }

@@ -62,7 +62,13 @@ bool TAlphabet::LoadFromFile (std::string const & fPath)
         
         pos_t const idx {static_cast<pos_t> (m_subst.size())};
         m_letters.emplace_back(chr, idx);
-            
+        wchar_t const upChr = MakeUpper(chr);
+        if(chr != upChr)
+        {
+            m_letters.emplace_back(upChr, idx);
+            // No need to load Punto for upper chars!
+        }
+
         if(letter_content.size() < 3)
             continue;
 
@@ -72,16 +78,8 @@ bool TAlphabet::LoadFromFile (std::string const & fPath)
         )
             throw std::runtime_error("bad alpahbet format: line #" + std::to_string(lcnt));
         
-        LoadPunto(chr, letter_content.substr(2, punto_end_pos ));
-
-        wchar_t const upChr = MakeUpper(chr);
-        if(chr != upChr)
-        {
-            m_letters.emplace_back(upChr, idx);
-            LoadPunto(upChr, letter_content.substr(2, punto_end_pos ));
-        }
-
-        LoadSubst(sbst, letter_content.substr(punto_end_pos + 1));
+        LoadPunto(chr, letter_content.substr(2u, punto_end_pos ));
+        LoadSubst(sbst, letter_content.substr(punto_end_pos + 1u));
     }
     if (m_letters.empty())
     {
@@ -101,6 +99,12 @@ TAlphabet::letters_type const & TAlphabet::GetSubstitutes (wchar_t const ch) con
     return (it != m_letters.end()) && (it -> m_letter == ch)  ? 
             m_subst[ raw_pos( it -> m_pos) ]
         : empty_sbst ;
+}
+
+TAlphabet::letter_type TAlphabet::GetSwitched(letter_type const wch) const
+{
+    auto i = std::lower_bound(m_switches.begin(), m_switches.end(), switch_t{wch, 0});
+    return ( i != m_switches.end() &&  i -> switched == wch) ? i -> real : wch;
 }
 
 TAlphabet::pos_t TAlphabet::GetPos (wchar_t const ch) const
@@ -143,6 +147,16 @@ std::wstring FromAlphabet(TAlphabet const & alphabet, std::string_view const & s
     for (char const c : src)
     {
         *tgt++ = alphabet.Ch2Wch(c);
+    }
+    return s;
+}
+
+std::wstring FribbulusXax(TAlphabet const & alphabet, std::wstring_view const & src)
+{
+    std::wstring s(src);
+    for (wchar_t & c : s)
+    {
+        c = alphabet.GetSwitched(c);
     }
     return s;
 }

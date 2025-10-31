@@ -3,7 +3,6 @@
 #include "utils.hpp"
 
 #include <boost/iterator/transform_iterator.hpp>
-#include <boost/range/iterator_range.hpp>
 
 #include <contrib/handypack/handypack.hpp>
 
@@ -38,10 +37,10 @@ public:
         HANDYPACK(switched, real);
 
         bool operator < (switch_t const & rhs) const
-        { return switched < switched; }
+        { return switched < rhs.switched; }
 
         bool operator == (switch_t const & rhs) const
-        { return switched == switched; }
+        { return switched == rhs.switched; }
     };
 
     enum class pos_t : unsigned char 
@@ -94,13 +93,15 @@ public:
 
     bool Contains(letter_type const ch) const {return GetPos(ch) != pos_t::Undefined;}
 
+    letter_type GetSwitched(letter_type const wch) const;
+
 private:
+
+    pos_t GetPos (letter_type const ch) const;
 
     void LoadPunto (letter_type const chr, std::wstring_view const & switched_letters);
 
     void LoadSubst (letters_type & sbst, std::wstring_view const & lttrs);
-
-    pos_t GetPos (letter_type const ch) const;
 
     using impl_type = std::vector<letter_info_t>;
     using punto_switch_type = std::vector<switch_t>;
@@ -122,12 +123,6 @@ public:
     const_iterator begin() const {return const_iterator(m_letters.begin(), trnsfrm_t{});}
     const_iterator end() const {return const_iterator(m_letters.end(), trnsfrm_t{});}
 
-    using switch_const_iterator = punto_switch_type::const_iterator;
-    using switch_range_type = boost::iterator_range<switch_const_iterator>;
-    
-    switch_range_type get_switches (letter_type const wch) const
-    { return std::equal_range(m_switches.begin(), m_switches.end(), switch_t{wch, 0});}
-
 private:
 
     impl_type           m_letters;
@@ -138,6 +133,9 @@ private:
 
 std::string ToAlphabet(TAlphabet const & alphabet, std::wstring_view const & src) ;
 std::wstring FromAlphabet(TAlphabet const & alphabet, std::string_view const & src) ;
+
+// aka Punto Switcher
+std::wstring FribbulusXax(TAlphabet const & alphabet, std::wstring_view const & src);
 
 
 } // NJamSpell
