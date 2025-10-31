@@ -200,15 +200,21 @@ private:
             }
             if (words.size() >= 2)
             {
-                for (auto it {words.begin()}, nxt{it + 1}, e{words.end()}
-                    ; nxt != e; m_grams[TGramKey {*it++, *nxt++}] += 1u
-                ){}
+                auto it {words.begin()}, nxt{it + 1}, e{words.end()};
+                do 
+                {
+                    m_grams[TGramKey {*it++, *nxt++}] += 1u;
+                }
+                while (nxt != e);                
             }
             if(words.size() >= 3)
             {
-                for (auto it {words.begin()}, nxt1{it + 1}, nxt2{nxt1 + 1}, e{words.end()}
-                    ; nxt2 != e; m_grams[TGramKey {*it++, *nxt1++, *nxt2++}] += 1u
-                ){}
+                auto it {words.begin()}, nxt1{it + 1}, nxt2{nxt1 + 1}, e{words.end()};
+                do 
+                {
+                    m_grams[TGramKey {*it++, *nxt1++, *nxt2++}] += 1u;
+                } 
+                while (nxt2 != e);
             }        
         }
         

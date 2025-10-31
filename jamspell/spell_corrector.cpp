@@ -211,7 +211,8 @@ void TSpellCorrector::FilterCandidatesByFrequency(
 std::vector<std::pair<std::wstring,double> > TSpellCorrector::GetCandidatesWithScores(
     const std::vector<std::wstring>& sentence,
     size_t position
-) const {
+) const 
+{
 
     TWords words(sentence.begin(), sentence.end());
     TScoredWords scoredCandidates = GetCandidatesRawWithScores(words, position);
