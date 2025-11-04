@@ -123,6 +123,12 @@ struct word_info_t
 using words_seq_t = std::vector<word_info_t>;
 using sentences_t = std::vector<words_seq_t>;
 
+struct word_info_greater_t
+{
+    bool operator () (word_info_t const & w1, word_info_t const & w2) const
+    { return w1.weight > w2.weight;}
+};
+
 std::string LoadFile(const std::string& fileName);
 void SaveFile(const std::string& fileName, const std::string& data);
 

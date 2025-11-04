@@ -29,20 +29,10 @@ public:
 
     using result_type = impl_type;
 
-    explicit TCandMgr (result_type & cands, std::size_t const maxCandCnt = 1024
-        , std::size_t const expCandCnt = 2048
-    )
-    : m_impl{cands}, m_ids {}, m_max_cnt{maxCandCnt}
+    explicit TCandMgr (result_type & cands, std::size_t const maxCandCnt = 64)
+    : m_impl{cands}, m_max_cnt{maxCandCnt}
     {
         m_impl.reserve(maxCandCnt + 1);     // for orig_word at later stages... 
-        m_ids.reserve(expCandCnt);
-    }
-
-    bool probe (wstr_view_type const & sw)  
-    {
-        static constexpr str_hash_type  sHasher{};
-        std::size_t const strH = sHasher(sw);
-        return m_ids.insert(strH).second;
     }
 
     bool insert (word_info_t const & inf)
@@ -57,14 +47,6 @@ public:
 
     bool empty() const {return m_impl.empty();}
 
-    std::size_t get_probed_cnt() const {return m_ids.size();}
-
-    void prepare_to_score()
-    {
-        id_set_type{}.swap(m_ids);  // just cleanup
-        //std::push_heap(m_impl.begin(), m_impl.end(), wheap_order);
-    }
-
 private:
 
     void insert_impl (word_info_t const & inf)
@@ -78,7 +60,6 @@ private:
     
 
     impl_type         & m_impl;
-    id_set_type         m_ids;
     std::wstring_view   m_orig;
     std::size_t const   m_max_cnt;
     
@@ -138,7 +119,8 @@ private:
             , TWord const origWord
     ) const;
 
-    std::wstring PuntoSwitcher(TWord const &w) const;
+    std::wstring PuntoSwitcher(wstr_view_type const &w) const;
+    void ReInitWord(word_info_t & word, wstr_view_type const & new_swtch_word_str) const;
 
     void FormEditsCandidates(word_info_t const & word
         , TCandMgr & candidates
@@ -155,10 +137,6 @@ private:
     bool LoadCache(const std::string& cacheFile);
     bool SaveCache(const std::string& cacheFile);
 
-    bool Add2CandidatesIfSuitable(std::wstring_view const & s
-        , TCandMgr & candidates
-    ) const;
-
     bool LookupAndAppend2Candidates(std::wstring_view const & w
         , TCandMgr & candidates
     ) const;
@@ -174,6 +152,10 @@ private:
         , bool const first_level
         , words_seq_t & candidates
     ) const;
+
+    words_seq_t Merge(words_seq_t const & a, words_seq_t const & b) const;
+
+    words_seq_t ProcessCandidates( words_seq_t & orig_sent, size_t const position) const;
 
 private:
 

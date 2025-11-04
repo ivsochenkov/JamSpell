@@ -87,6 +87,7 @@ bool TAlphabet::LoadFromFile (std::string const & fPath)
     }
    
     std::sort(m_letters.begin(), m_letters.end());
+    std::sort(m_upper.begin(), m_upper.end());
     std::sort(m_switches.begin(), m_switches.end());
     return true;
 }
