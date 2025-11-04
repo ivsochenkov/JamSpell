@@ -70,6 +70,7 @@ private:
         letter_type         m_letter = 0;        
         pos_t               m_pos = pos_t::Undefined;
 
+
         HANDYPACK(m_letter, m_pos);
     };
 
@@ -77,7 +78,7 @@ private:
 
 public:
 
-    HANDYPACK(m_letters, m_switches, m_subst)
+    HANDYPACK(m_letters, m_upper, m_switches, m_subst)
 
     void Clear() ;
 
@@ -91,17 +92,12 @@ public:
 
     letters_type const & GetSubstitutes (letter_type const ch) const ;
 
-    bool Contains(letter_type const ch) const {return GetPos(ch) != pos_t::Undefined;}
+    bool Contains(letter_type const ch) const 
+    {return GetPos(ch) != pos_t::Undefined; }
 
     letter_type GetSwitched(letter_type const wch) const;
 
 private:
-
-    pos_t GetPos (letter_type const ch) const;
-
-    void LoadPunto (letter_type const chr, std::wstring_view const & switched_letters);
-
-    void LoadSubst (letters_type & sbst, std::wstring_view const & lttrs);
 
     using impl_type = std::vector<letter_info_t>;
     using punto_switch_type = std::vector<switch_t>;
@@ -111,6 +107,20 @@ private:
         wchar_t operator () (letter_info_t const & i) const
         { return i.m_letter;}
     };
+
+    static pos_t GetPos (impl_type const & lttrs, wchar_t const ch);
+
+    pos_t GetPos (letter_type const ch) const
+    {
+        pos_t const p = GetPos(m_letters, ch);
+        return (p != pos_t::Undefined) ? p : GetPos(m_upper, ch);
+    }
+
+    void LoadPunto (letter_type const chr, std::wstring_view const & switched_letters);
+
+    void LoadSubst (letters_type & sbst, std::wstring_view const & lttrs);
+
+    
 
 public: 
     using const_iterator = boost::transform_iterator <trnsfrm_t
@@ -125,7 +135,7 @@ public:
 
 private:
 
-    impl_type           m_letters;
+    impl_type           m_letters, m_upper;
     punto_switch_type   m_switches;
     substitutes_type    m_subst;
 

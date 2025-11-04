@@ -4,6 +4,16 @@
 #include <vector>
 #include <string_view>
 #include <locale>
+#include <cstdint>
+#include <limits>
+#include <type_traits>
+#include <functional>
+
+#ifdef DEBUG
+#define JS_TRACE_MSG(arg) arg
+#else
+#define JS_TRACE_MSG(arg) 
+#endif
 
 #ifdef USE_BOOST_CONVERT
     #include <boost/locale/encoding_utf.hpp>
@@ -13,7 +23,23 @@
 
 #include <contrib/handypack/handypack.hpp>
 
-namespace NJamSpell {
+namespace NJamSpell 
+{
+
+    //using TWordId = uint32_t;
+enum class TWordId : uint32_t 
+{
+    Unknown = std::numeric_limits<std::underlying_type<TWordId>::type>::max()
+};
+
+inline constexpr std::underlying_type<TWordId>::type to_underlying(TWordId w)
+{return static_cast<std::underlying_type<TWordId>::type>(w);}
+
+using TCount = uint32_t;
+
+using TWordIds = std::vector<TWordId>;
+using TIdSentences = std::vector<TWordIds>;
+
 
 struct TWord {
     TWord() = default;
@@ -45,11 +71,6 @@ struct TWord {
     size_t Len = 0;
 };
 
-struct TScoredWord {
-    TWord Word;
-    double Score = 0;
-};
-
 struct TWordHashPtr {
 public:
   std::size_t operator()(const TWord& x) const {
@@ -58,8 +79,49 @@ public:
 };
 
 using TWords = std::vector<TWord>;
-using TScoredWords = std::vector<TScoredWord>;
 using TSentences = std::vector<TWords>;
+
+struct TScoredWord 
+{
+    TWord Word;
+    double Score = 0;
+
+    explicit TScoredWord (TWord const & w = TWord{}, double sc = 0.0)
+    : Word (w), Score {sc} 
+    {}
+};
+
+using TScoredWords = std::vector<TScoredWord>;
+
+using wstr_view_type = std::wstring_view;
+
+struct word_info_t
+{
+    wstr_view_type          str;            // 16
+    float                   weight;         // 4
+    TWordId                 id;             // 4
+    //bool                    first_level;    // 8
+                                            // SIV: 32 bits! Pack to 24!
+
+    explicit word_info_t (TWordId const & i = TWordId::Unknown
+        , wstr_view_type const & wstr = wstr_view_type{}
+        , float const w = 0.0
+    )
+    : str{wstr}, weight{w}, id{i}
+    {}
+
+    explicit word_info_t (wstr_view_type const & wstr )
+    : str{wstr}, id{TWordId::Unknown}
+    {}
+
+    explicit operator bool () const {return !empty();}
+
+    bool empty() const {return TWordId::Unknown == id;}
+
+};
+
+using words_seq_t = std::vector<word_info_t>;
+using sentences_t = std::vector<words_seq_t>;
 
 std::string LoadFile(const std::string& fileName);
 void SaveFile(const std::string& fileName, const std::string& data);
@@ -109,6 +171,12 @@ private:
     cnv_type    m_cnv;
 #endif
 };
+
+inline std::locale GetLocale () 
+{
+    static const std::locale GLocale = std::locale("ru_RU.UTF-8");
+    return GLocale;
+}
 
 //std::wstring UTF8ToWide(const std::string& text);
 //std::string WideToUTF8(const std::wstring& text);

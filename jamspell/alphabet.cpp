@@ -55,17 +55,17 @@ bool TAlphabet::LoadFromFile (std::string const & fPath)
           
         std::wstring_view const letter_content (lcnverted);
 
+        pos_t const idx {static_cast<pos_t> (m_subst.size())};
         m_subst.emplace_back();
         auto & sbst = m_subst.back();
-        if (m_subst.size() >= static_cast<std::size_t> (pos_t::Undefined)) 
+        if (idx >= pos_t::Undefined) 
             throw std::runtime_error("alphabet size greater than 254 is not supported!\n"); 
         
-        pos_t const idx {static_cast<pos_t> (m_subst.size())};
         m_letters.emplace_back(chr, idx);
         wchar_t const upChr = MakeUpper(chr);
         if(chr != upChr)
         {
-            m_letters.emplace_back(upChr, idx);
+            m_upper.emplace_back(upChr, idx);
             // No need to load Punto for upper chars!
         }
 
@@ -107,10 +107,10 @@ TAlphabet::letter_type TAlphabet::GetSwitched(letter_type const wch) const
     return ( i != m_switches.end() &&  i -> switched == wch) ? i -> real : wch;
 }
 
-TAlphabet::pos_t TAlphabet::GetPos (wchar_t const ch) const
+TAlphabet::pos_t TAlphabet::GetPos (impl_type const & lttrs, wchar_t const ch)
 {
-    auto const it = std::lower_bound(m_letters.begin(), m_letters.end(), letter_info_t {ch} );
-    return (it != m_letters.end()) && (it -> m_letter == ch)  ? 
+    auto const it = std::lower_bound(lttrs.begin(), lttrs.end(), letter_info_t {ch} );
+    return (it != lttrs.end()) && (it -> m_letter == ch)  ? 
             it -> m_pos
         :   pos_t::Undefined;
 }

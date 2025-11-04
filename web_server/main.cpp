@@ -9,7 +9,7 @@ std::string GetCandidates(const NJamSpell::TSpellCorrector& corrector,
     NJamSpell::utf8_to_wide_t utf8_to_wide;
     NJamSpell::wide_to_utf8_t wide_to_utf8;
     std::wstring input = utf8_to_wide(text);    
-    NJamSpell::TSentences sentences = corrector.GetLangModel().Tokenize(input);
+    NJamSpell::TSentences sentences = corrector.GetLangModel().GetTokenizer().Tokenize(input);
     std::transform(input.begin(), input.end(), input.begin(), std::towlower);
 
     nlohmann::json results;

@@ -21,20 +21,6 @@ constexpr uint64_t LANG_MODEL_MAGIC_BYTE = 8559322735408079685L;
 constexpr uint16_t LANG_MODEL_VERSION = 9;
 constexpr double LANG_MODEL_DEFAULT_K = 0.05;
 
-//using TWordId = uint32_t;
-enum class TWordId : uint32_t 
-{
-    Unknown = std::numeric_limits<std::underlying_type<TWordId>::type>::max()
-};
-
-inline constexpr std::underlying_type<TWordId>::type to_underlying(TWordId w)
-{return static_cast<std::underlying_type<TWordId>::type>(w);}
-
-using TCount = uint32_t;
-
-using TWordIds = std::vector<TWordId>;
-using TIdSentences = std::vector<TWordIds>;
-
 struct wstr_hash_t
 {
     std::size_t operator () (std::wstring_view const & w) const
@@ -44,26 +30,39 @@ struct wstr_hash_t
     }
 };
 
-using wstr_to_id_map_t = tsl::robin_map<std::wstring, TWordId
+struct wdata_t
+{
+    TWordId     id;
+    TCount      count;
+
+    explicit wdata_t(TWordId const i = TWordId::Unknown, TCount const c = 0)
+    :id{i}, count {c}
+    {}
+
+    HANDYPACK(id, count)
+};
+
+
+using wstr_to_id_map_t = tsl::robin_map<std::wstring, wdata_t
         , wstr_hash_t
         , std::equal_to<void> //wstr_equal_t
         , std::allocator<std::pair<std::wstring, TWordId> >
         , true // store hash
-        , tsl::rh::mod_growth_policy<std::ratio<11, 10> >
+        , tsl::rh::prime_growth_policy
     >;
 
 class TRobinSerializer: public NHandyPack::TUnorderedMapSerializer<
-    wstr_to_id_map_t, std::wstring, TWordId
+    wstr_to_id_map_t, std::wstring, wdata_t
 > 
 {};
 
 class TRobinHash: public wstr_to_id_map_t 
 {
 public:
-    virtual void Dump(std::ostream& out) const {
+    void Dump(std::ostream& out) const {
         TRobinSerializer::Dump(out, *this);
     }
-    virtual void Load(std::istream& in) {
+    void Load(std::istream& in) {
         TRobinSerializer::Load(in, *this);
     }
 };
@@ -92,13 +91,19 @@ public:
         , train_options_t const & tr_opt = train_options_t::make_default()
     );
 
+    double Score(word_info_t const * beg, word_info_t const * e) const;
+
     double Score(const TWords& words) const;
     double Score(std::wstring str) const;
 
     TWord GetWord(const std::wstring_view& word) const;
 
+    word_info_t GetWordInfo(const std::wstring_view& word) const;
+
     alphabet_type const & GetAlphabet() const { return Tokenizer.GetAlphabet();}
-    TSentences Tokenize(const std::wstring& text) const;
+    TTokenizer const & GetTokenizer() const {return Tokenizer;}
+
+    
 
     bool Dump(const std::string& modelFileName) const;
     bool Load(const std::string& modelFileName);
@@ -106,8 +111,8 @@ public:
 
     const TRobinHash& GetWordToId();
 
-    TWordId GetWordId(const TWord& word);
-    TWordId GetWordIdNoCreate(const TWord& word) const;
+    TWordId MakeWordId(const TWord& word);
+    TWordId GetWordId(const TWord& word) const;
     //TWord GetWordById(TWordId wid) const;
     TCount GetWordCount(TWordId wid) const;
 
@@ -118,6 +123,20 @@ public:
 private:
 
     TIdSentences ConvertToIds(const TSentences& sentences);
+
+    long double CalcGram1Prob(word_info_t const & winf) const
+    {
+        return ((long double )(winf.weight) + K) / (TotalWords + VocabSize);
+    }
+    
+    long double CalcGram2Prob(word_info_t const & winf1
+        , word_info_t const & winf2
+    ) const;
+
+    long double CalcGram3Prob(word_info_t const & winf1
+        , word_info_t const & winf2
+        , word_info_t const & winf3
+    ) const;
 
     double GetGram1Prob(TWordId word) const;
     double GetGram2Prob(TWordId word1, TWordId word2) const;

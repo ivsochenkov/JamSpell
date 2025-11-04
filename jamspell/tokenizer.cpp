@@ -12,7 +12,8 @@
 namespace NJamSpell 
 {
 
-inline void TTokenizer::AddSentenceIfNeeded(TSentences & sentences, TWords & currSent )
+template<typename TSentSeq, typename TWSeq>
+inline void TTokenizer::AddSentenceIfNeeded(TSentSeq & sentences, TWSeq & currSent )
 {
     if(!currSent.empty())
     {
@@ -21,8 +22,6 @@ inline void TTokenizer::AddSentenceIfNeeded(TSentences & sentences, TWords & cur
         currSent.reserve(avg_sent_len_words);
     }
 }
-
-
 
 inline bool TTokenizer::isSentBreak(token_iterator_type curr_tok_it
     , token_iterator_type const & e
@@ -39,7 +38,8 @@ inline bool TTokenizer::isSentBreak(token_iterator_type curr_tok_it
     );
 }
 
-void TTokenizer::AddTokens(TWords & sent
+template<typename TWSeq>
+void TTokenizer::AddTokens(TWSeq & sent
     , token_type::const_iterator s, token_type::const_iterator e
 ) const
 {
@@ -50,7 +50,7 @@ void TTokenizer::AddTokens(TWords & sent
         {
             if (prev != s)
             {
-                sent.emplace_back(prev, std::distance(prev, s));
+                sent.emplace_back(wstr_view_type(prev, std::distance(prev, s)));
                 prev = s;
             }
             ++prev;
@@ -58,8 +58,49 @@ void TTokenizer::AddTokens(TWords & sent
     }
     if (prev != e)
     {
-        sent.emplace_back(prev, std::distance(prev, e));
+        sent.emplace_back(wstr_view_type(prev, std::distance(prev, e)));
     }
+}
+
+template <typename TSentSeq>
+void TTokenizer::TokenizerImpl(const std::wstring_view& originalText, TSentSeq & result )const
+{
+    result.reserve(3 + originalText.size() / avg_sent_len_bytes);
+    using sentence_type = typename TSentSeq::value_type;
+    
+    sentence_type currSentence;
+    currSentence.reserve(avg_sent_len_words);
+
+    sep_type sep; 
+    tokenizer_impl_type tok(originalText.begin(), originalText.end(), sep);
+
+    bool prev_punct{false};
+    for(tokenizer_impl_type::iterator tok_iter= tok.begin()
+            , e = tok.end()
+        ; tok_iter != e
+        ; ++tok_iter
+    )
+    {
+        token_type const curr_tok_str (*tok_iter);
+        if(curr_tok_str.size() == 1)
+        {
+            wchar_t const curr_ch{curr_tok_str[0]};
+            if(std::ispunct(curr_ch, Locale))
+            {  
+                if( isSentBreak(tok_iter, e))
+                {
+                    AddSentenceIfNeeded(result, currSentence);
+                    continue;
+                }
+                prev_punct = true;
+                continue;
+            }          
+        }
+        AddTokens(currSentence, curr_tok_str.begin(), curr_tok_str.end());              
+        prev_punct = false;
+    }
+
+    AddSentenceIfNeeded(result, currSentence);
 }
 
 TTokenizer::TTokenizer()
@@ -81,42 +122,14 @@ TSentences TTokenizer::Tokenize(const std::wstring_view& originalText) const
         return sentences;
     }
     
-    sentences.reserve(3 + originalText.size() / avg_sent_len_bytes);
-    TWords currSentence;
-    currSentence.reserve(avg_sent_len_words);
-
-    sep_type sep; 
-    tokenizer_impl_type tok(originalText.begin(), originalText.end(), sep);
-
-    bool prev_punct{false};
-    for(tokenizer_impl_type::iterator tok_iter= tok.begin()
-            , e = tok.end()
-        ; tok_iter != e
-        ; ++tok_iter
-    )
-    {
-        token_type const curr_tok_str (*tok_iter);
-        if(curr_tok_str.size() == 1)
-        {
-            wchar_t const curr_ch{curr_tok_str[0]};
-            if(std::ispunct(curr_ch, Locale))
-            {  
-                if( isSentBreak(tok_iter, e))
-                {
-                    AddSentenceIfNeeded(sentences, currSentence);
-                    continue;
-                }
-                prev_punct = true;
-                continue;
-            }          
-        }
-        AddTokens(currSentence, curr_tok_str.begin(), curr_tok_str.end());              
-        prev_punct = false;
-    }
-
-    AddSentenceIfNeeded(sentences, currSentence);
+    TokenizerImpl(originalText, sentences);
 
     return sentences;
+}
+
+void TTokenizer::Tokenize(const std::wstring_view& originalText, sentences_t & result )const
+{
+    TokenizerImpl(originalText, result);
 }
 
 void TTokenizer::Clear() 

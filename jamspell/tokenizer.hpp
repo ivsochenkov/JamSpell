@@ -40,19 +40,31 @@ class TTokenizer
     static inline bool isHardSentBreak(wchar_t const ch)
     { return ch == L'!' || ch == L'?'; }
 
-    static void AddSentenceIfNeeded(TSentences & sentences, TWords & currSent );
+    template<typename TSentSeq, typename TWSeq>
+    static void AddSentenceIfNeeded(TSentSeq & sentences, TWSeq & currSent );
     
     bool iSpaceDelimited(token_iterator_type const & curr_tok_it
         , token_iterator_type const & next
     ) const 
     { return curr_tok_it -> end() < next -> begin();}  
 
-    bool isSentBreak(token_iterator_type curr_tok_it, token_iterator_type const & e) const;
+    bool isSentBreak(token_iterator_type curr_tok_it
+        , token_iterator_type const & e
+    ) const;
 
     bool isCapitalLetter(wchar_t const wch)const 
     {return std::isupper(wch, Locale);}
 
-    void AddTokens(TWords & sent, token_type::const_iterator s, token_type::const_iterator e) const;
+    template<typename TWSeq>
+    void AddTokens(TWSeq & sent
+        , token_type::const_iterator s
+        , token_type::const_iterator e
+    ) const;
+
+    template <typename TSentSeq>
+    void TokenizerImpl(const std::wstring_view& originalText
+        , TSentSeq & result 
+    )const;
 
 public:
 
@@ -65,6 +77,7 @@ public:
     TTokenizer();
     bool LoadAlphabet(const std::string& alphabetFile);
     TSentences Tokenize(const std::wstring_view& originalText) const;
+    void Tokenize(const std::wstring_view& originalText, sentences_t & result )const;
     void Clear();
 
     alphabet_type const & GetAlphabet() const {return Alphabet;}

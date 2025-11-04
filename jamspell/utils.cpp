@@ -1,3 +1,5 @@
+#include "utils.hpp"
+
 #include <fstream>
 #include <sstream>
 #include <chrono>
@@ -6,12 +8,10 @@
 #include <cassert>
 #include <algorithm>
 
-#include "utils.hpp"
-
 #include <contrib/cityhash/city.h>
 
-
-namespace NJamSpell {
+namespace NJamSpell 
+{
 
 std::string LoadFile(const std::string& fileName) {
     std::ifstream in(fileName, std::ios::binary);
@@ -54,8 +54,7 @@ uint64_t GetCurrentTimeMs() {
     return ms.count();
 }
 
-static const std::locale GLocale = std::locale("ru_RU.UTF-8");
-static const std::ctype<wchar_t>& GWctype = std::use_facet<std::ctype<wchar_t>>(GLocale);
+static const std::ctype<wchar_t>& GWctype = std::use_facet<std::ctype<wchar_t>>(GetLocale () );
 
 void ToLower(std::wstring& text) 
 {
