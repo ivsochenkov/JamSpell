@@ -13,6 +13,18 @@
 namespace NJamSpell 
 {
 
+/*
+words_seq_t::iterator GetNextSentenceEnd(words_seq_t::iterator b
+    , words_seq_t::iterator const & e
+)
+{
+    for( ; (b != e) && (!isSentEnd (*b); ++b) 
+    {}
+
+    return b;
+}
+*/
+
 std::string LoadFile(const std::string& fileName) {
     std::ifstream in(fileName, std::ios::binary);
     std::ostringstream out;
@@ -56,11 +68,13 @@ uint64_t GetCurrentTimeMs() {
 
 static const std::ctype<wchar_t>& GWctype = std::use_facet<std::ctype<wchar_t>>(GetLocale () );
 
+/*
 void ToLower(std::wstring& text) 
 {
     if(!text.empty())
         GWctype.tolower(text.data(), text.data() + text.size());
 }
+*/
 
 wchar_t MakeLower(wchar_t orig)
 {

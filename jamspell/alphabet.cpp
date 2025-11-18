@@ -12,17 +12,33 @@
 namespace NJamSpell 
 {
 
+bool TAlphabet::isIgnorable (letter_type const chr) 
+{
+    return chr == 0 || chr == 10 || chr == 13 || chr == UniversalCh 
+    || chr == L' ';
+}
+
 void TAlphabet::Reserve() 
 {
     m_letters.reserve(max_size);
     m_subst.reserve(max_size);
     m_switches.reserve(max_size);
+    m_all.reserve(max_size);
 }
 
 void TAlphabet::Clear() 
 {
     m_letters.clear();
+    m_switches.clear();
     m_subst.clear();
+}
+
+
+void TAlphabet::AddLetter(letter_type const ch, pos_t & idx)
+{
+    idx = static_cast<pos_t> (m_subst.size());
+    m_subst.emplace_back(ch);
+    m_letters.emplace_back(ch, idx);
 }
 
 bool TAlphabet::LoadFromFile (std::string const & fPath)
@@ -35,109 +51,169 @@ bool TAlphabet::LoadFromFile (std::string const & fPath)
 
     Reserve();
     
-    std::size_t lcnt{0};    
     utf8_to_wide_t utf8_to_wide{};
+
+    strings_type    lines;
+
+    m_subst.emplace_back(char(0));             // zero char
+    m_letters.emplace_back( char(0), pos_t(0));
+
+    //m_switches.emplace_back(0, 0); // no need to do this;
     while (!in.eof())
     {  
         std::string l;        
         std::getline(in, l); 
-        ++lcnt;
 
         if(l.empty())
             continue;
 
         std::wstring lcnverted (utf8_to_wide(l));
-        ToLower(lcnverted);
-
         wchar_t const chr = lcnverted[0];
-        if (chr == 0 || chr == 10 || chr == 13) 
+        if (isIgnorable(chr)) 
             continue;
-          
-        std::wstring_view const letter_content (lcnverted);
 
-        pos_t const idx {static_cast<pos_t> (m_subst.size())};
-        m_subst.emplace_back();
-        auto & sbst = m_subst.back();
-        if (idx >= pos_t::Undefined) 
+        lines.push_back(std::move(lcnverted));
+
+        pos_t idx;
+        AddLetter(chr, idx);
+
+        if (idx >= pos_t::Any) 
             throw std::runtime_error("alphabet size greater than 254 is not supported!\n"); 
-        
-        m_letters.emplace_back(chr, idx);
+
         wchar_t const upChr = MakeUpper(chr);
         if(chr != upChr)
         {
-            m_upper.emplace_back(upChr, idx);
+            m_letters.emplace_back(upChr, idx);
             // No need to load Punto for upper chars!
         }
-
-        if(letter_content.size() < 3)
-            continue;
-
-        std::size_t punto_end_pos;
-        if(letter_content[1] != L'#' 
-            || ((punto_end_pos = letter_content.find(L'#', 2)) == std::wstring::npos)
-        )
-            throw std::runtime_error("bad alpahbet format: line #" + std::to_string(lcnt));
-        
-        LoadPunto(chr, letter_content.substr(2u, punto_end_pos ));
-        LoadSubst(sbst, letter_content.substr(punto_end_pos + 1u));
     }
     if (m_letters.empty())
     {
         return false;
     }
-   
-    std::sort(m_letters.begin(), m_letters.end());
-    std::sort(m_upper.begin(), m_upper.end());
-    std::sort(m_switches.begin(), m_switches.end());
+
+    m_all.reserve(lines.size() * lines.size()) ;
+    LoadLines(lines);
     return true;
+
 }
 
 
-TAlphabet::letters_type const & TAlphabet::GetSubstitutes (wchar_t const ch) const
+TAlphabet::letter_type TAlphabet::GetSwitched(char const ch) const
 {
-    static const letters_type empty_sbst;
-    auto const it = std::lower_bound(m_letters.begin(), m_letters.end(), letter_info_t {ch} );
+    auto i = std::lower_bound(m_switches.begin(), m_switches.end(), switch_t{ch, 0});
+    return ( i != m_switches.end() &&  i -> switched == ch) ? i -> real : ch;
+}
+
+void TAlphabet::LoadLines(strings_type const & lines )
+{
+    std::sort(m_letters.begin(), m_letters.end()); 
+    // we will use it to convert chars! See GetPos method!
+
+    auto subst_it = m_subst.begin();
+    ++subst_it; // the first is empty - for Undefined zero-char!
+    for(auto lit = lines.begin(), e = lines.end(); lit != e; ++lit, ++subst_it)
+    {
+        if(lit -> size() < 3)
+        {
+            continue;   
+        }
+
+        wstr_view_t const lcontent = *lit;
+
+        std::size_t punto_end_pos;
+        if(lcontent[1] != SepCh
+            || ((punto_end_pos = lcontent.find(SepCh, 2)) == std::wstring::npos)
+        )
+        {
+            throw std::runtime_error("bad alpahbet format: ill-formed line \'" 
+                + wide_to_utf8_t{}(*lit) + '\''
+            );
+        }
+
+        LoadPunto(lcontent[0], lcontent.substr(2u, punto_end_pos ));
+        LoadSubst(subst_it -> subs, lcontent.substr(punto_end_pos + 1u));
+    }
+
+    std::sort(m_switches.begin(), m_switches.end());
+    std::sort(m_all.begin(), m_all.end());
+    m_all.resize(std::distance(m_all.begin(), std::unique(m_all.begin(), m_all.end())));
+    m_all.shrink_to_fit();
+
+}
+
+TAlphabet::pos_t TAlphabet::GetPos ( letter_type const ch) const
+{
+    auto const it = std::lower_bound(m_letters.begin(), m_letters.end()
+        , letter_info_t {ch} 
+    );
+
     return (it != m_letters.end()) && (it -> m_letter == ch)  ? 
-            m_subst[ raw_pos( it -> m_pos) ]
-        : empty_sbst ;
-}
-
-TAlphabet::letter_type TAlphabet::GetSwitched(letter_type const wch) const
-{
-    auto i = std::lower_bound(m_switches.begin(), m_switches.end(), switch_t{wch, 0});
-    return ( i != m_switches.end() &&  i -> switched == wch) ? i -> real : wch;
-}
-
-TAlphabet::pos_t TAlphabet::GetPos (impl_type const & lttrs, wchar_t const ch)
-{
-    auto const it = std::lower_bound(lttrs.begin(), lttrs.end(), letter_info_t {ch} );
-    return (it != lttrs.end()) && (it -> m_letter == ch)  ? 
             it -> m_pos
         :   pos_t::Undefined;
 }
 
-void TAlphabet::LoadPunto(letter_type const chr, std::wstring_view const & switched_letters)
+void TAlphabet::LoadPunto(letter_type const chr
+    , std::wstring_view const & switched_letters
+)
 {
+    char const c = Wch2Ch(chr);
     for (letter_type const l : switched_letters)
     {
-        m_switches.emplace_back(l, chr);
+        char const sc = Wch2Ch(l);
+        if(c)
+        {
+            m_switches.emplace_back(sc, c);
+        }
     }
 }
 
-void TAlphabet::LoadSubst (letters_type & sbst, std::wstring_view const & lttrs)
+void TAlphabet::LoadSubst (subs_type & sbst, std::wstring_view const & lttrs)
 {
-    sbst.assign(lttrs.begin(), lttrs.end());
+    sbst.reserve(lttrs.size());
+    for (letter_type wc : lttrs)
+    {
+        char const c = Wch2Ch(wc);
+        if(c)
+        {
+            sbst.push_back(c);
+        }
+    }
+    std::sort(sbst.begin(), sbst.end());
+    sbst.resize(std::distance(sbst.begin(), std::unique(sbst.begin(), sbst.end())));
+    m_all.insert(m_all.end(), sbst.begin(), sbst.end());
 }
 
-
-std::string ToAlphabet(TAlphabet const & alphabet, std::wstring_view const & src)
+bool WellFormedInAlphabet(std::string_view const & src)
 {
-    std::string s(src.size(), '\0');
-    auto tgt = s.begin();
+    if (src.size() >= MAX_WORD_LENGTH)
+        return false;
+        
+    for(char c : src)
+    {
+        if(!c)
+            return false;
+    }
+    return true;
+}
+
+void ToAlphabet(TAlphabet const & alphabet
+    , std::wstring_view const & src
+    , str_t & res
+)
+{
+    res.resize(src.size(), '\0');
+    auto tgt = res.begin();
     for(auto it = src.begin(), e = src.end()
         ; it != e
         ; *(tgt++) = alphabet.Wch2Ch(*it++)
     ){}
+}
+
+str_t ToAlphabet(TAlphabet const & alphabet, std::wstring_view const & src)
+{
+    std::string s;
+    ToAlphabet(alphabet, src, s);
     return s;
 }
 
@@ -152,10 +228,10 @@ std::wstring FromAlphabet(TAlphabet const & alphabet, std::string_view const & s
     return s;
 }
 
-std::wstring FribbulusXax(TAlphabet const & alphabet, std::wstring_view const & src)
+str_t FribbulusXax(TAlphabet const & alphabet, str_view_t const & src)
 {
-    std::wstring s(src);
-    for (wchar_t & c : s)
+    str_t s(src);
+    for (auto & c : s)
     {
         c = alphabet.GetSwitched(c);
     }

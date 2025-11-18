@@ -1,5 +1,15 @@
 #pragma once
 
+#ifdef USE_BOOST_CONVERT
+    #include <boost/locale/encoding_utf.hpp>
+#else
+    #include <codecvt>
+#endif
+
+#include <contrib/handypack/handypack.hpp>
+
+#include <boost/range/iterator_range.hpp>
+
 #include <string>
 #include <vector>
 #include <string_view>
@@ -15,21 +25,13 @@
 #define JS_TRACE_MSG(arg) 
 #endif
 
-#ifdef USE_BOOST_CONVERT
-    #include <boost/locale/encoding_utf.hpp>
-#else
-    #include <codecvt>
-#endif
-
-#include <contrib/handypack/handypack.hpp>
-
 namespace NJamSpell 
 {
 
-    //using TWordId = uint32_t;
 enum class TWordId : uint32_t 
 {
-    Unknown = std::numeric_limits<std::underlying_type<TWordId>::type>::max()
+      Any     = std::numeric_limits<std::underlying_type<TWordId>::type>::min()
+    , Unknown = std::numeric_limits<std::underlying_type<TWordId>::type>::max()
 };
 
 inline constexpr std::underlying_type<TWordId>::type to_underlying(TWordId w)
@@ -40,6 +42,9 @@ using TCount = uint32_t;
 using TWordIds = std::vector<TWordId>;
 using TIdSentences = std::vector<TWordIds>;
 
+static constexpr const unsigned MAX_WORD_LENGTH = 64;
+
+/*
 
 struct TWord {
     TWord() = default;
@@ -93,41 +98,62 @@ struct TScoredWord
 
 using TScoredWords = std::vector<TScoredWord>;
 
-using wstr_view_type = std::wstring_view;
+*/
+
+using wstr_view_t = std::wstring_view;
+using str_view_t = std::string_view;
+using str_t = std::string;
 
 struct word_info_t
 {
-    wstr_view_type          str;            // 16
-    float                   weight;         // 4
-    TWordId                 id;             // 4
-    //bool                    first_level;    // 8
-                                            // SIV: 32 bits! Pack to 24!
+    using str_type =        str_t;
 
-    explicit word_info_t (TWordId const & i = TWordId::Unknown
-        , wstr_view_type const & wstr = wstr_view_type{}
+    str_type                str;            
+    float                   weight;         
+    TWordId                 id;             
+    bool                    first_level = true;
+
+    explicit word_info_t (TWordId const i
+        , str_type const & s
         , float const w = 0.0
     )
-    : str{wstr}, weight{w}, id{i}
+    : str{s}, weight{w}, id{i}
     {}
 
-    explicit word_info_t (wstr_view_type const & wstr )
-    : str{wstr}, id{TWordId::Unknown}
+    explicit word_info_t (TWordId const i  = TWordId::Unknown, float const w = 0.0)
+    : str{}, weight{w}, id{i}
     {}
 
-    explicit operator bool () const {return !empty();}
+    explicit word_info_t (str_type const & s )
+    : str{s}, weight{0.0}, id{TWordId::Unknown}
+    {}
 
-    bool empty() const {return TWordId::Unknown == id;}
+    explicit operator bool () const {return !unknown();}
+
+    bool unknown() const {return TWordId::Unknown == id;}
 
 };
 
 using words_seq_t = std::vector<word_info_t>;
-using sentences_t = std::vector<words_seq_t>;
+using word_seq_range_t = boost::iterator_range<words_seq_t::iterator>;
 
 struct word_info_greater_t
 {
     bool operator () (word_info_t const & w1, word_info_t const & w2) const
     { return w1.weight > w2.weight;}
 };
+
+/*
+words_seq_t::iterator GetNextSentenceEnd(words_seq_t::iterator b
+    , words_seq_t::iterator const & e
+);
+
+
+inline bool isSentEnd(word_info_t const & winf)
+{
+    return winf.str.empty();
+}
+*/
 
 std::string LoadFile(const std::string& fileName);
 void SaveFile(const std::string& fileName, const std::string& data);
@@ -188,13 +214,24 @@ inline std::locale GetLocale ()
 //std::string WideToUTF8(const std::wstring& text);
 
 uint64_t GetCurrentTimeMs();
-void ToLower(std::wstring& text);
+//void ToLower(std::wstring& text);
 wchar_t MakeLower(wchar_t orig);
 wchar_t MakeUpper(wchar_t orig);
 
 inline wchar_t MakeUpperIfRequired(wchar_t orig, wchar_t sample) 
 {
     return (MakeUpper(sample) == sample) ? MakeUpper(orig) : orig;
+}
+
+inline str_view_t Remap(str_view_t const & atxt
+    , wstr_view_t const & orig_txt
+    , wstr_view_t const & orig_word
+)
+{
+    return str_view_t(
+            atxt.data() + std::distance(orig_txt.data(), orig_word.data())
+        ,   orig_word.size()
+    );
 }
 
 uint16_t CityHash16(const std::string& str);

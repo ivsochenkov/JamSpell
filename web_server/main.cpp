@@ -6,16 +6,81 @@
 std::string GetCandidates(const NJamSpell::TSpellCorrector& corrector,
                           const std::string& text)
 {
-    NJamSpell::utf8_to_wide_t utf8_to_wide;
-    NJamSpell::wide_to_utf8_t wide_to_utf8;
-    std::wstring input = utf8_to_wide(text);    
-    NJamSpell::TSentences sentences = corrector.GetLangModel().GetTokenizer().Tokenize(input);
-    std::transform(input.begin(), input.end(), input.begin(), std::towlower);
+    using namespace NJamSpell;
+
+    utf8_to_wide_t utf8_to_wide;
+    wide_to_utf8_t wide_to_utf8;
+    std::wstring const input = utf8_to_wide(text); 
+    
+    std::wstring_view const orig_txt(input);
+    
+    text_tokens_t orig_txt_tokens = corrector.GetLangModel().GetTokenizer().Parse(orig_txt);
+    corrector.GetLangModel().GetTokenizer().FilterAndJoinHyphen(orig_txt_tokens);
+    words_seq_t txt_words = corrector.GetLangModel().InitWords(orig_txt_tokens);
+    assert(txt_words.size() == orig_txt_tokens.size());
 
     nlohmann::json results;
     results["results"] = nlohmann::json::array();
 
-    for (size_t i = 0; i < sentences.size(); ++i) {
+    size_t origPos = 0;
+    for (auto orig_it = orig_txt_tokens.cbegin(), e = orig_txt_tokens.cend()
+        ; orig_it < e 
+        ; ++orig_it // see the last line marked with !!!. We omit sent end token
+                    // and proceed to next sentence begin
+    )
+    {
+        auto orig_sent = GetNextSent(orig_it, e);
+
+        word_seq_range_t curr_sent(MapSentence(txt_words, orig_txt_tokens, orig_sent));
+        std::size_t j = 0;
+
+        for ( auto al_word_it = curr_sent.begin()
+            ; al_word_it != curr_sent.end()
+            ; ++j, ++al_word_it
+        ) 
+        {
+            if (al_word_it -> str.empty())
+            {
+                continue;
+            }
+
+            word_info_t & curr_word = *al_word_it;
+            words_seq_t const &candidates = corrector.GetCandidates(curr_sent, j);
+            if (!candidates.empty()) 
+            {
+                word_info_t const & top_w = candidates.front();
+                if(curr_word.id == top_w.id)
+                {
+                    continue;
+                }
+            }
+
+            size_t const currOrigPos = getOffset(orig_sent[j].data(), orig_txt);
+            nlohmann::json currentResult;
+            
+            currentResult["pos_from"] = currOrigPos;
+            currentResult["len"] = orig_sent[j].size();
+            currentResult["candidates"] = nlohmann::json::array();
+
+            std::size_t const candidatesSize = std::min(candidates.size(), std::size_t(7));
+            for (std::size_t k = 0; k < candidatesSize; ++k) 
+            {
+                currentResult["candidates"].push_back(
+                    wide_to_utf8(
+                        FromAlphabet(corrector.GetLangModel().GetTokenizer().GetAlphabet()
+                        , candidates[k].str
+                    )
+                ));
+            }
+
+            results["results"].push_back(currentResult);
+        }
+        orig_it = orig_sent.end();  // !!!
+
+    }
+/*
+    for (size_t i = 0; i < sentences.size(); ++i) 
+    {
         const NJamSpell::TWords& sentence = sentences[i];
         for (size_t j = 0; j < sentence.size(); ++j) {
             NJamSpell::TWord currWord = sentence[j];
@@ -45,7 +110,7 @@ std::string GetCandidates(const NJamSpell::TSpellCorrector& corrector,
             results["results"].push_back(currentResult);
         }
     }
-
+    */
     return results.dump(4);
 }
 

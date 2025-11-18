@@ -12,99 +12,13 @@
 namespace NJamSpell 
 {
 
-template<typename TSentSeq, typename TWSeq>
-inline void TTokenizer::AddSentenceIfNeeded(TSentSeq & sentences, TWSeq & currSent )
+void TTokenizer::FilterAndJoinHyphen(text_tokens_t & tokens) const
 {
-    if(!currSent.empty())
-    {
-        sentences.emplace_back();
-        sentences.back().swap(currSent);
-        currSent.reserve(avg_sent_len_words);
-    }
-}
-
-inline bool TTokenizer::isSentBreak(token_iterator_type curr_tok_it
-    , token_iterator_type const & e
-) const
-{
-    wchar_t const curr_wch{(*curr_tok_it)[0]};
-    token_iterator_type next {curr_tok_it}; ++next;
-
-    return isHardSentBreak(curr_wch) 
-    || (isSoftSentEnd(curr_wch)
-        && (    next == e 
-            || (isCapitalLetter((*next)[0]) && ( iSpaceDelimited(curr_tok_it, next) ) )
-        )
-    );
-}
-
-template<typename TWSeq>
-void TTokenizer::AddTokens(TWSeq & sent
-    , token_type::const_iterator s, token_type::const_iterator e
-) const
-{
-    token_type::const_iterator prev(s);
-    for(; s != e; ++s)
-    {
-        if(!Alphabet.Contains(*s))
-        {
-            if (prev != s)
-            {
-                sent.emplace_back(wstr_view_type(prev, std::distance(prev, s)));
-                prev = s;
-            }
-            ++prev;
-        }
-    }
-    if (prev != e)
-    {
-        sent.emplace_back(wstr_view_type(prev, std::distance(prev, e)));
-    }
-}
-
-template <typename TSentSeq>
-void TTokenizer::TokenizerImpl(const std::wstring_view& originalText, TSentSeq & result )const
-{
-    result.reserve(3 + originalText.size() / avg_sent_len_bytes);
-    using sentence_type = typename TSentSeq::value_type;
-    
-    sentence_type currSentence;
-    currSentence.reserve(avg_sent_len_words);
-
-    sep_type sep; 
-    tokenizer_impl_type tok(originalText.begin(), originalText.end(), sep);
-
-    bool prev_punct{false};
-    for(tokenizer_impl_type::iterator tok_iter= tok.begin()
-            , e = tok.end()
-        ; tok_iter != e
-        ; ++tok_iter
-    )
-    {
-        token_type const curr_tok_str (*tok_iter);
-        if(curr_tok_str.size() == 1)
-        {
-            wchar_t const curr_ch{curr_tok_str[0]};
-            if(std::ispunct(curr_ch, Locale))
-            {  
-                if( isSentBreak(tok_iter, e))
-                {
-                    AddSentenceIfNeeded(result, currSentence);
-                    continue;
-                }
-                prev_punct = true;
-                continue;
-            }          
-        }
-        AddTokens(currSentence, curr_tok_str.begin(), curr_tok_str.end());              
-        prev_punct = false;
-    }
-
-    AddSentenceIfNeeded(result, currSentence);
+    FilterJoin(join_hyphen_pred_t{*this}, tokens);
 }
 
 TTokenizer::TTokenizer()
-    : Locale(std::locale::classic())
+    : Locale(GetLocale () )
 {
 }
 
@@ -113,23 +27,15 @@ bool TTokenizer::LoadAlphabet(const std::string& alphabetFile)
     return Alphabet.LoadFromFile(alphabetFile);
 }
 
-
-TSentences TTokenizer::Tokenize(const std::wstring_view& originalText) const 
+text_tokens_t TTokenizer::Parse(const std::wstring_view& txt
+    , sep_type const & sep 
+) const
 {
-    TSentences sentences;
-    if (originalText.empty()) 
-    {
-        return sentences;
-    }
-    
-    TokenizerImpl(originalText, sentences);
-
-    return sentences;
-}
-
-void TTokenizer::Tokenize(const std::wstring_view& originalText, sentences_t & result )const
-{
-    TokenizerImpl(originalText, result);
+    tokenizer_type const & tok(Tokenize(txt, sep));
+    text_tokens_t ret;
+    ret.reserve(1u + txt.size() / avg_word_len);
+    ret.assign(tok.begin(), tok.end());
+    return ret;
 }
 
 void TTokenizer::Clear() 
@@ -137,6 +43,13 @@ void TTokenizer::Clear()
     Alphabet.Clear();
 }
 
-
+text_tokens_const_iterator_t GetNextSentEnd(text_tokens_const_iterator_t b
+    , text_tokens_const_iterator_t const & e
+)
+{
+    for(; (b != e) && (! TTokenizer::isSentEnd( *b )) ; ++b )
+    {}
+    return b;
+}
 
 } // NJamSpell

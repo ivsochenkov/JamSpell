@@ -13,7 +13,7 @@ namespace NJamSpell
 
 class TCandMgr 
 {
-    using str_hash_type = std::hash<wstr_view_type>;
+    using str_hash_type = std::hash<wstr_view_t>;
 
     using id_set_type = tsl::robin_set<std::uint64_t>;
 
@@ -82,11 +82,13 @@ public:
         , const std::string& modelFile
     );
 
-    bool WordIsKnown(const std::wstring_view& word) const;
+    bool WordIsKnown( str_view_t const & word) const; 
 
-    words_seq_t GetCandidates(words_seq_t & orig_sent, size_t const position) const;
+    words_seq_t GetCandidates(word_seq_range_t const & orig_sent
+        , size_t const position
+    ) const;
 
-    TWords GetCandidatesRaw(const TWords& sentence, size_t const position) const;
+    //TWords GetCandidatesRaw(const TWords& sentence, size_t const position) const;
 
     std::vector<std::wstring> GetCandidates(const std::vector<std::wstring>& sentence
         , size_t const position
@@ -98,7 +100,7 @@ public:
     ) const;
     
     std::wstring FixFragment(const std::wstring& text) const;
-    std::wstring FixFragmentNormalized(const std::wstring& text) const;
+    //std::wstring FixFragmentNormalized(const std::wstring& text) const;
     
     void SetPenalty(double knownWordsPenalty, double unknownWordsPenalty);
     void SetMaxCandidatesToCheck(size_t maxCandidatesToCheck);
@@ -111,43 +113,54 @@ private:
     
     void AppendWithCase(std::wstring & result
         , std::wstring_view const & origWord
-        , std::wstring_view const &newWord
+        , str_view_t const & newWord
     ) const;
 
-    void FilterCandidatesByFrequency(
-            std::unordered_set<TWord, TWordHashPtr>& uniqueCandidates
-            , TWord const origWord
-    ) const;
-
-    std::wstring PuntoSwitcher(wstr_view_type const &w) const;
-    void ReInitWord(word_info_t & word, wstr_view_type const & new_swtch_word_str) const;
+    str_t PuntoSwitcher(str_view_t const &w) const;
+    void ReInitWord(word_info_t & word, str_t && new_swtch_word) const;
 
     void FormEditsCandidates(word_info_t const & word
         , TCandMgr & candidates
         , bool & firstLevel
     ) const;
 
-    void Edits(wstr_view_type const& word, TCandMgr & candidates) const;
-    void Edits2(wstr_view_type const& word, TCandMgr & candidates, bool lastLevel = true) const;
+    void Edits(str_view_t const & word, TCandMgr & candidates) const;
+    void Edits2(str_view_t const & word
+        , TCandMgr & candidates
+        , bool lastLevel = true
+    ) const;
 
-    void Inserts(const std::wstring_view& w, TCandMgr& result) const;
-    void Inserts2(const std::wstring_view& w, TCandMgr& result) const;
+    void InsertsImpl(str_view_t const& w
+        , std::size_t const i
+        , TCandMgr& result
+        , str_t & buf
+    ) const;
+    void Inserts(str_view_t const & w, TCandMgr& result, str_t & s) const;
+
+    void Inserts2Impl(str_view_t const & w
+        , std::size_t const i
+        , TCandMgr& result
+        , str_t & s
+        , str_t & buf
+    ) const;
+    void Inserts2(str_view_t const & w, TCandMgr& result) const;
+
 
     void PrepareCache();
     bool LoadCache(const std::string& cacheFile);
     bool SaveCache(const std::string& cacheFile);
 
-    bool LookupAndAppend2Candidates(std::wstring_view const & w
+    bool LookupAndAppend2Candidates(bool const first_level
+        , str_view_t const & w
         , TCandMgr & candidates
     ) const;
 
-    words_seq_t MakeSentence(TWords const & sentence) const;
+    sent_range GetSentenceRange( word_seq_range_t const & sentence
+        , std::size_t const pos
+    ) const;
 
-    void InitSentWords(sentences_t & sentences) const;
-
-    sent_range GetSentenceRange( words_seq_t & sentence, std::size_t const pos) const;
-
-    void Score(words_seq_t & in_sentence
+    void Score(bool const force_orig_word_score
+        , word_seq_range_t const & orig_sent
         , std::size_t const sz
         , bool const first_level
         , words_seq_t & candidates
@@ -155,16 +168,23 @@ private:
 
     words_seq_t Merge(words_seq_t const & a, words_seq_t const & b) const;
 
-    words_seq_t ProcessCandidates( words_seq_t & orig_sent, size_t const position) const;
+    words_seq_t ProcessCandidates(bool const force_orig_word_score
+        , word_seq_range_t const & orig_sent
+        , size_t const position
+    ) const;
 
 private:
 
-    TLangModel LangModel;
-    std::unique_ptr<TBloomFilter> Deletes1;
-    std::unique_ptr<TBloomFilter> Deletes2;
-    double KnownWordsPenalty = 20.0;
-    double UnknownWordsPenalty = 5.0;
-    size_t MaxCandidatesToCheck = 14;
+    TLangModel                      LangModel;
+    std::unique_ptr<TBloomFilter>   Deletes1;
+    std::unique_ptr<TBloomFilter>   Deletes2;
+
+    double      KnownWordsPenalty = 15.0        // 20
+            ,   UnknownWordsPenalty = 5.0       // 5
+            ,   SecondLvlPenFactor = 40.0       // 50
+            ;
+
+    size_t      MaxCandidatesToCheck = 64;
 
 };
 

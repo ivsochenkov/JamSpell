@@ -23,14 +23,28 @@ public:
 
     using letter_type = wchar_t;
 
-    using letters_type = std::vector<letter_type>;
-    using substitutes_type = std::vector<letters_type>;
+    static constexpr letter_type const UniversalCh = 0, SepCh = L'#';
+
+    using subs_type = std::vector<char>;
+
+    enum class pos_t : unsigned char 
+    { 
+        Undefined = 0
+        , Any = std::numeric_limits<std::underlying_type<pos_t>::type>::max() 
+    };
+
+    inline std::underlying_type<pos_t>::type raw_pos (pos_t const p) const
+    { return static_cast<std::underlying_type<pos_t>::type> (p);}
+
+    static bool isIgnorable (letter_type const chr) ;
+
+private:
 
     struct switch_t
     {
-        letter_type switched, real;
+        char switched, real;
 
-        explicit switch_t(letter_type const s = 0, letter_type const r = 0)
+        explicit switch_t(char const s = 0, char const r = 0)
         : switched{s}, real{r}
         {}
 
@@ -43,15 +57,22 @@ public:
         { return switched == rhs.switched; }
     };
 
-    enum class pos_t : unsigned char 
-    { 
-        Undefined = std::numeric_limits<std::underlying_type<pos_t>::type>::max() 
+    struct subs_info_t
+    {
+        subs_type       subs;
+        letter_type     letter;
+
+        explicit subs_info_t (letter_type const wc = UniversalCh)
+        : subs{}, letter(wc) 
+        {}
+
+        HANDYPACK(subs, letter)
+
     };
 
-    inline std::underlying_type<pos_t>::type raw_pos (pos_t const p) const
-    { return static_cast<std::underlying_type<pos_t>::type> (p);}
+    using subs_map_type = std::vector<subs_info_t>;
 
-private:
+    using strings_type = std::list<std::wstring>;
 
     struct letter_info_t
     {
@@ -78,24 +99,27 @@ private:
 
 public:
 
-    HANDYPACK(m_letters, m_upper, m_switches, m_subst)
+    HANDYPACK(m_letters, m_switches, m_subst, m_all)
 
     void Clear() ;
+
+    void AddLetter(letter_type const ch, pos_t & idx);
 
     bool LoadFromFile (std::string const & fPath);
 
     char Wch2Ch (letter_type const ch) const 
-    {return static_cast<char>(GetPos(ch)) + 1 ; }
+    {   return static_cast<char>(GetPos(ch));  }
 
     letter_type Ch2Wch (char const ch) const 
-    {return m_letters[raw_pos(pos_t(ch - 1))].m_letter; }
+    {return m_subst[std::size_t(ch)].letter; }
 
-    letters_type const & GetSubstitutes (letter_type const ch) const ;
+    subs_type const & GetSubstitutes (char const ch) const 
+    { return m_subst[std::size_t(ch)].subs;}
 
     bool Contains(letter_type const ch) const 
     {return GetPos(ch) != pos_t::Undefined; }
 
-    letter_type GetSwitched(letter_type const wch) const;
+    letter_type GetSwitched(char const ch) const;
 
 private:
 
@@ -108,44 +132,42 @@ private:
         { return i.m_letter;}
     };
 
-    static pos_t GetPos (impl_type const & lttrs, wchar_t const ch);
+    void LoadLines(strings_type const & lines );
 
-    pos_t GetPos (letter_type const ch) const
-    {
-        pos_t const p = GetPos(m_letters, ch);
-        return (p != pos_t::Undefined) ? p : GetPos(m_upper, ch);
-    }
+    pos_t GetPos (letter_type const ch) const;
 
     void LoadPunto (letter_type const chr, std::wstring_view const & switched_letters);
-
-    void LoadSubst (letters_type & sbst, std::wstring_view const & lttrs);
-
-    
+    void LoadSubst (subs_type & sbst, std::wstring_view const & lttrs);
 
 public: 
-    using const_iterator = boost::transform_iterator <trnsfrm_t
-        , impl_type::const_iterator
-        , wchar_t, wchar_t
-        >;
 
+    using const_iterator = subs_type::const_iterator;
     using iterator = const_iterator;
 
-    const_iterator begin() const {return const_iterator(m_letters.begin(), trnsfrm_t{});}
-    const_iterator end() const {return const_iterator(m_letters.end(), trnsfrm_t{});}
+    const_iterator begin() const {return m_all.begin();}
+    const_iterator end() const {return m_all.end();}
 
 private:
 
-    impl_type           m_letters, m_upper;
+    impl_type           m_letters;
     punto_switch_type   m_switches;
-    substitutes_type    m_subst;
+    subs_map_type       m_subst;
+    subs_type           m_all;
 
 };
 
-std::string ToAlphabet(TAlphabet const & alphabet, std::wstring_view const & src) ;
-std::wstring FromAlphabet(TAlphabet const & alphabet, std::string_view const & src) ;
+bool WellFormedInAlphabet(std::string_view const & src);
+
+void ToAlphabet(TAlphabet const & alphabet
+    , std::wstring_view const & src
+    , str_t & res
+);
+str_t ToAlphabet(TAlphabet const & alphabet, wstr_view_t const & src);
+
+std::wstring FromAlphabet(TAlphabet const & alphabet, str_view_t const & src) ;
 
 // aka Punto Switcher
-std::wstring FribbulusXax(TAlphabet const & alphabet, std::wstring_view const & src);
+str_t FribbulusXax(TAlphabet const & alphabet, str_view_t const & src);
 
 
 } // NJamSpell
