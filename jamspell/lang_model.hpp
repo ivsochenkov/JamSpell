@@ -21,8 +21,8 @@ namespace NJamSpell
 {
 
 
-constexpr uint64_t LANG_MODEL_MAGIC_BYTE = 8559322735408079685L;
-constexpr uint16_t LANG_MODEL_VERSION = 9;
+constexpr uint64_t LANG_MODEL_MAGIC_BYTE = 8559322735408079686L;
+constexpr uint16_t LANG_MODEL_VERSION = 1;
 constexpr double LANG_MODEL_DEFAULT_K = 0.05;
 
 /*
@@ -150,8 +150,8 @@ public:
 
     struct train_options_t
     {
-        std::size_t             max_grams_sz        = 70000000;
-        std::array<unsigned, 4> ngram_thresholds    = {10, 6, 4};
+        std::size_t             max_grams_sz        = 99000000;
+        std::array<unsigned, 3> ngram_thresholds    = {9, 6, 4};
                         
         float                   growth_factor       = 1.015;
 

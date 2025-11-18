@@ -74,24 +74,15 @@ private:
     bool iSpaceDelimited(TTokIt const & curr_tok_it, TTokIt const & next) const 
     { return curr_tok_it -> end() < next -> begin();}  
 
+    template <typename TTokIt>
+    bool isNotSpaceDelimited(TTokIt const & curr_tok_it, TTokIt const & next) const 
+    { return curr_tok_it -> end() == next -> begin();}  
+
     bool isCapitalLetter(wchar_t const wch)const 
     {return std::isupper(wch, Locale);}
 
-    struct join_hyphen_pred_t
-    {
-        explicit join_hyphen_pred_t (TTokenizer const & tknzr): m_tknzr(tknzr) {}
-
-        bool operator () (std::wstring_view const& a
-            , std::wstring_view const& b
-            , std::wstring_view const & c
-        ) const
-        {
-            return (b.size() == 1) && m_tknzr.isHyphen(b.front()) 
-                && m_tknzr.isGoodWordToken(c);
-        }
-        private:
-            TTokenizer const &  m_tknzr;
-    };
+    struct join_hyphen_pred_t;
+    struct join_pred_t;
 
 public:
 
@@ -122,6 +113,8 @@ public:
     void FilterJoin(TJoinPred && good4Join
         , text_tokens_t & tokens
     ) const;
+
+    void FilterAndJoin(text_tokens_t & tokens) const;
 
     void FilterAndJoinHyphen(text_tokens_t & tokens) const;
 
@@ -176,32 +169,42 @@ void TTokenizer::FilterJoin(TJoinPred && good4Join
     , text_tokens_t & tokens
 ) const
 {
+    bool prev_tok_is_good = false;
     text_tokens_t::iterator tgt_it = tokens.begin();
-    for(text_tokens_t::iterator i = tgt_it, e = tokens.end() ; i != e ; ++i )
+    for(text_tokens_t::iterator i = tokens.begin(), e = tokens.end() ; i != e ; ++i)
     {
         if( isGoodWordToken(*i))
         {
-            text_tokens_t::iterator nxt1_it = i;
-            text_tokens_t::iterator nxt2_it = ++nxt1_it;
-            if((nxt1_it != e) && (++nxt2_it != e) 
-                && std::invoke(std::forward<TJoinPred>(good4Join), *i, *nxt1_it, *nxt2_it)
-            )
-            {
-                *tgt_it++ = std::wstring(i -> data()
-                    , std::distance(i -> data(), nxt2_it -> data() + nxt2_it -> size())
-                );
-                i = nxt2_it;
-            }
-            else
-            {
-                *tgt_it++ = *i;
-            }
+            *tgt_it++ = *i;
+            prev_tok_is_good = true;
         }
         else if((!i->empty()) && isSentBreak(i, e))
         {
             *tgt_it++ = *i;
+            prev_tok_is_good = false;
         }
-        // omit punct and emplty tokes if any!
+        else if (prev_tok_is_good)
+        {
+            // try to join!
+            text_tokens_t::iterator nxt_it = i;
+            if(++nxt_it != e)
+            {
+                if(std::invoke(std::forward<TJoinPred>(good4Join), --tgt_it, i, nxt_it))
+            
+                {
+                    *tgt_it = wstr_view_t(tgt_it -> data()
+                        , std::distance(tgt_it -> data(), nxt_it -> data() + nxt_it -> size())
+                    );
+                    //prev_tok_is_good = true; // remains true, so don't needed!
+                    i = nxt_it;
+                }
+                else
+                {
+                    prev_tok_is_good = false;  // i is not good
+                }
+                ++tgt_it;
+            }
+        }
     }
 
     tokens.resize(std::distance(tokens.begin(), tgt_it));   

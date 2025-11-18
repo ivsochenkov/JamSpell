@@ -228,7 +228,7 @@ std::wstring TSpellCorrector::FixFragment(const std::wstring& text) const
 {
     std::wstring_view const orig_txt(text);
     text_tokens_t orig_txt_tokens = LangModel.GetTokenizer().Parse(text);
-    LangModel.GetTokenizer().FilterAndJoinHyphen(orig_txt_tokens);
+    LangModel.GetTokenizer().FilterAndJoin(orig_txt_tokens);
     words_seq_t txt_words = LangModel.InitWords(orig_txt_tokens);
     assert(txt_words.size() == orig_txt_tokens.size());
 

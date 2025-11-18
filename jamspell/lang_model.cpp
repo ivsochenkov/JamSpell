@@ -504,7 +504,7 @@ double TLangModel::Score(text_tokens_t & words) const
 double TLangModel::Score(std::wstring const & str ) const 
 {
     text_tokens_t orig_txt_tokens = GetTokenizer().Parse(str);
-    GetTokenizer().FilterAndJoinHyphen(orig_txt_tokens);
+    GetTokenizer().FilterAndJoin(orig_txt_tokens);
     return Score(orig_txt_tokens);
 }
 

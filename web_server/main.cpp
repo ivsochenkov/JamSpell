@@ -15,7 +15,7 @@ std::string GetCandidates(const NJamSpell::TSpellCorrector& corrector,
     std::wstring_view const orig_txt(input);
     
     text_tokens_t orig_txt_tokens = corrector.GetLangModel().GetTokenizer().Parse(orig_txt);
-    corrector.GetLangModel().GetTokenizer().FilterAndJoinHyphen(orig_txt_tokens);
+    corrector.GetLangModel().GetTokenizer().FilterAndJoin(orig_txt_tokens);
     words_seq_t txt_words = corrector.GetLangModel().InitWords(orig_txt_tokens);
     assert(txt_words.size() == orig_txt_tokens.size());
 
