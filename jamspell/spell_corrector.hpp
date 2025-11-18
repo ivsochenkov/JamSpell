@@ -179,9 +179,9 @@ private:
     std::unique_ptr<TBloomFilter>   Deletes1;
     std::unique_ptr<TBloomFilter>   Deletes2;
 
-    double      KnownWordsPenalty = 15.0        // 20
+    double      KnownWordsPenalty = 10.0        // 20
             ,   UnknownWordsPenalty = 5.0       // 5
-            ,   SecondLvlPenFactor = 40.0       // 50
+            ,   SecondLvlPenFactor = 25.0       // 50
             ;
 
     size_t      MaxCandidatesToCheck = 64;

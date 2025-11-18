@@ -337,6 +337,14 @@ const TLangModel& TSpellCorrector::GetLangModel() const {
 str_t TSpellCorrector::PuntoSwitcher(str_view_t const &w) const
 { 
     str_t s = FribbulusXax(LangModel.GetAlphabet(), w);
+    JS_TRACE_MSG(std::cerr << "[debug] Switched kb-layout for word: \'" 
+        << wide_to_utf8_t{}(
+            FromAlphabet(GetLangModel().GetTokenizer().GetAlphabet(), w)
+        ) << "\' to \'" 
+        << wide_to_utf8_t{}(
+            FromAlphabet(GetLangModel().GetTokenizer().GetAlphabet(), s)
+        ) << "\'\n"
+    );
     if(s == w)
     {
         s = str_t{};
@@ -366,7 +374,11 @@ void TSpellCorrector::FormEditsCandidates(word_info_t const & word
 
 void TSpellCorrector::Edits(str_view_t const& word, TCandMgr & candidates) const 
 {
-    wide_to_utf8_t wide_to_utf8;
+    JS_TRACE_MSG(std::cerr << "[debug] Edits (2-letters) candidates for word: \'" 
+        << wide_to_utf8_t{}(
+            FromAlphabet(GetLangModel().GetTokenizer().GetAlphabet(), word)
+        ) << "\'\n" 
+    );
 
     del2_vec_t cands = GetDeletes2(word);
     cands.emplace_back(1, str_t{word});
@@ -394,6 +406,12 @@ void TSpellCorrector::Edits2(str_view_t const & word
     ,  bool lastLevel
 ) const 
 {
+    JS_TRACE_MSG(std::cerr << "[debug] Edits (1-letters) candidates for word: \'" 
+        << wide_to_utf8_t{}(
+            FromAlphabet(GetLangModel().GetTokenizer().GetAlphabet(), word)
+        ) << "\'\n" 
+    );
+
     str_view_t const & w(word);
 
     str_t s;

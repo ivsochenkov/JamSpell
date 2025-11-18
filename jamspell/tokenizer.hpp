@@ -227,9 +227,8 @@ inline word_seq_range_t MapSentence (words_seq_t & words
 {
     auto wbeg = words.begin(), wend = wbeg;
     std::advance(wbeg, std::distance(orig_txt_tokens.begin(), curr_sent.begin()));
-    std::advance(wend, std::distance(orig_txt_tokens.begin(), curr_sent.end()) - 1);
-    // sentence break is the last, so we do not need to process it!
-    return word_seq_range_t(wbeg, (curr_sent.size() <= 1) ? wbeg : wend );
+    std::advance(wend, std::distance(orig_txt_tokens.begin(), curr_sent.end()));
+    return word_seq_range_t(wbeg, wend);
 }
 
 inline std::size_t getOffset(wchar_t const * pos

@@ -151,9 +151,9 @@ public:
     struct train_options_t
     {
         std::size_t             max_grams_sz        = 70000000;
-        std::array<unsigned, 4> ngram_thresholds    = {8, 4, 2};
+        std::array<unsigned, 4> ngram_thresholds    = {10, 6, 4};
                         
-        float                   growth_factor       = 1.02;
+        float                   growth_factor       = 1.015;
 
         static train_options_t make_default();
     };

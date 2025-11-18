@@ -131,7 +131,7 @@ void TAlphabet::LoadLines(strings_type const & lines )
             );
         }
 
-        LoadPunto(lcontent[0], lcontent.substr(2u, punto_end_pos ));
+        LoadPunto(lcontent[0], lcontent.substr(2u, punto_end_pos - 2u ));
         LoadSubst(subst_it -> subs, lcontent.substr(punto_end_pos + 1u));
     }
 
