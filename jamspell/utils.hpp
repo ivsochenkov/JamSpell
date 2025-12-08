@@ -1,10 +1,6 @@
 #pragma once
 
-#ifdef USE_BOOST_CONVERT
-    #include <boost/locale/encoding_utf.hpp>
-#else
-    #include <codecvt>
-#endif
+#include <boost/locale/encoding_utf.hpp>
 
 #include <contrib/handypack/handypack.hpp>
 
@@ -162,46 +158,20 @@ struct utf8_to_wide_t
 {
     std::wstring operator () (std::string const & text) 
     {
-#ifdef USE_BOOST_CONVERT
         using boost::locale::conv::utf_to_utf;
         return utf_to_utf<wchar_t>(text.c_str(), text.c_str() + text.size());
-#else
-        return m_cnv.from_bytes(text);
-#endif        
     }
 
 private:
-#ifdef USE_BOOST_CONVERT
-#else
-    using cnv_type = std::wstring_convert<std::codecvt_utf8_utf16<
-        wchar_t, 0x10ffff, std::little_endian>
-    >;
-    cnv_type    m_cnv;
-#endif
 };
 
 struct wide_to_utf8_t
 {
     std::string operator () (const std::wstring& text)
     {
-#ifdef USE_BOOST_CONVERT
         using boost::locale::conv::utf_to_utf;
         return utf_to_utf<char>(text.c_str(), text.c_str() + text.size());
-#else
-        
-    return m_cnv.to_bytes(text);
-#endif        
     }
-
-private:
-#ifdef USE_BOOST_CONVERT
-#else
-    using cnv_type = std::wstring_convert<
-        std::codecvt_utf8<wchar_t, 0x10ffff, std::little_endian>
-        , wchar_t
-    >;
-    cnv_type    m_cnv;
-#endif
 };
 
 inline std::locale GetLocale () 

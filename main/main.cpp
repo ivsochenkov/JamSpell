@@ -3,6 +3,9 @@
 #include <jamspell/lang_model.hpp>
 #include <jamspell/spell_corrector.hpp>
 
+#include <filesystem>
+#include <fstream>
+
 using namespace NJamSpell;
 
 void PrintUsage(const char** argv) {
@@ -47,18 +50,57 @@ int Fix(const std::string& modelFile,
 {
     TSpellCorrector corrector;
     std::cerr << "[info] loading model" << std::endl;
-    if (!corrector.LoadLangModel(modelFile)) {
+    if (!corrector.LoadLangModel(modelFile)) 
+    {
         std::cerr << "[error] failed to load model" << std::endl;
         return 42;
     }
     std::cerr << "[info] loaded" << std::endl;
+    
+    std::size_t const file_sz = std::filesystem::file_size(inputFile);
+    std::ifstream in(inputFile, std::ios::binary);
+    if(!in)
+    {
+        return 84;
+    }
+
+    std::ofstream out(outFile, std::ios::binary);
+    if(!out)
+    {
+        return 96;
+    }
+
+    std::size_t lcnt{0}, bytes_cnt{0};
+    std::string l;        
     utf8_to_wide_t utf8_to_wide;
-    std::wstring text = utf8_to_wide(LoadFile(inputFile));
-    uint64_t startTime = GetCurrentTimeMs();
-    std::wstring result = corrector.FixFragment(text);
-    uint64_t finishTime = GetCurrentTimeMs();
     wide_to_utf8_t wide_to_utf8;
-    SaveFile(outFile, wide_to_utf8(result));
+    uint64_t const startTime = GetCurrentTimeMs();
+    uint64_t lastTime{0};
+
+    while (!in.eof())
+    {            
+        std::getline(in, l); 
+        ++lcnt;
+        if(!l.empty())
+        {            
+            bytes_cnt += (1 + l.size());
+            std::wstring const & text = utf8_to_wide(l);
+            std::wstring const & result = corrector.FixFragment(text);
+            out << wide_to_utf8(result) << '\n' << std::flush;
+            
+            if (lcnt % 1000 == 0)
+            {
+                uint64_t currTime = GetCurrentTimeMs();
+                if( currTime - lastTime > 5000)
+                {
+                    std::cerr << "[info] procesed " << (100.0 * bytes_cnt / file_sz)  
+                        << "%\n";
+                    lastTime = currTime;
+                }
+            }
+        }        
+    }
+    uint64_t const finishTime = GetCurrentTimeMs();
     std::cerr << "[info] process time: " << finishTime - startTime << "ms" << std::endl;
     return 0;
 }
