@@ -369,7 +369,9 @@ inline void AssignWordInfo(word_info_t & tgt, word_info_t && src)
 {
     if(!src.unknown())
     {
-        tgt = std::move(src);
+        //tgt = std::move(src); // do not empty tgt.str !!!
+        tgt.id = src.id;
+        tgt.weight = src.weight;
     }
 }
 

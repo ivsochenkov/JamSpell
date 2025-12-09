@@ -37,7 +37,7 @@ public:
 
     bool insert (word_info_t const & inf)
     {
-        if((m_max_cnt >= m_impl.size()) && (inf.weight <= m_impl.back().weight))
+        if((m_impl.size() >= m_max_cnt) && (inf.weight <= m_impl.back().weight))
         {
             return false;
         }        
@@ -121,13 +121,14 @@ private:
 
     void FormEditsCandidates(word_info_t const & word
         , TCandMgr & candidates
-        , bool & firstLevel
+        , bool const firstLevel
     ) const;
 
     void Edits(str_view_t const & word, TCandMgr & candidates) const;
     void Edits2(str_view_t const & word
         , TCandMgr & candidates
-        , bool lastLevel = true
+        , bool const firstLevel
+        , bool const lastLevel = true
     ) const;
 
     void InsertsImpl(str_view_t const& w
@@ -162,7 +163,6 @@ private:
     void Score(bool const force_orig_word_score
         , word_seq_range_t const & orig_sent
         , std::size_t const sz
-        , bool const first_level
         , words_seq_t & candidates
     ) const;
 
@@ -171,6 +171,7 @@ private:
     words_seq_t ProcessCandidates(bool const force_orig_word_score
         , word_seq_range_t const & orig_sent
         , size_t const position
+        , bool const firstLevel
     ) const;
 
 private:

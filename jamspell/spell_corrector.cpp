@@ -105,14 +105,16 @@ words_seq_t TSpellCorrector::GetCandidates(word_seq_range_t const & orig_sent
     word_info_t & orig_word = orig_sent[position];
     word_info_t const oword = orig_word;    // make a copy!
 
-    words_seq_t const & cands = ProcessCandidates(true, orig_sent, position);
+    words_seq_t const & cands = ProcessCandidates(true, orig_sent, position, true);
+    // first_level = true
     words_seq_t sw_cands;
     {
         str_t switched_word = PuntoSwitcher(orig_word.str);
         if(!switched_word.empty())
         {
             ReInitWord(orig_word, std::move(switched_word));
-            sw_cands = ProcessCandidates(false, orig_sent, position);
+            sw_cands = ProcessCandidates(false, orig_sent, position, false);
+            // first_level = false
         }        
     }
 
@@ -360,15 +362,13 @@ void TSpellCorrector::ReInitWord(word_info_t & word, str_t && new_swtch_word) co
 
 void TSpellCorrector::FormEditsCandidates(word_info_t const & word
     , TCandMgr & candidates
-    , bool & firstLevel
+    , bool const firstLevel
 ) const
 {
-    Edits2(word.str, candidates, true);  // MAY BE last_level = false
-    firstLevel = true;
+    Edits2(word.str, candidates, firstLevel, true);  // MAY BE last_level = false
     if (candidates.empty()) 
     {
         Edits(word.str, candidates);
-        firstLevel = false;
     } 
 }
 
@@ -403,7 +403,8 @@ void TSpellCorrector::Edits(str_view_t const& word, TCandMgr & candidates) const
 
 void TSpellCorrector::Edits2(str_view_t const & word
     , TCandMgr & candidates
-    ,  bool lastLevel
+    , bool const firstLevel
+    , bool const lastLevel
 ) const 
 {
     JS_TRACE_MSG(std::cerr << "[debug] Edits (1-letters) candidates for word: \'" 
@@ -422,10 +423,10 @@ void TSpellCorrector::Edits2(str_view_t const & word
         if (i < w.size()) 
         {
             (s = w.substr(0, i)) += w.substr(i+1);
-            LookupAndAppend2Candidates(true, s, candidates);
+            LookupAndAppend2Candidates(firstLevel, s, candidates);
             if (!lastLevel) 
             {
-                Edits2(s, candidates);
+                Edits2(s, candidates, false, true);
             }
         }
 
@@ -437,10 +438,10 @@ void TSpellCorrector::Edits2(str_view_t const & word
             {
                 s += w.substr(i+2);
             }
-            LookupAndAppend2Candidates(true, s, candidates);
+            LookupAndAppend2Candidates(firstLevel, s, candidates);
             if (!lastLevel) 
             {
-                Edits2(s, candidates);
+                Edits2(s, candidates, false, true);
             }
         }
 
@@ -448,13 +449,19 @@ void TSpellCorrector::Edits2(str_view_t const & word
         if (i < w.size()) 
         {
             TAlphabet::subs_type const & sbt = LangModel.GetAlphabet().GetSubstitutes(w[i]);
+            JS_TRACE_MSG(std::cerr << "[debug] substitutes for letter \'"
+                << wide_to_utf8_t{}(std::wstring(1, LangModel.GetAlphabet().Ch2Wch(w[i]))) 
+                << "\': " << wide_to_utf8_t{}(
+                    FromAlphabet(LangModel.GetAlphabet(), str_view_t(sbt.data(), sbt.size()) )) 
+                << "\'\n" 
+            );
             for (auto&& ch: sbt) 
             {
                 ((s = w.substr(0, i)) += ch) += w.substr(i+1);
-                LookupAndAppend2Candidates(true, s, candidates);
+                LookupAndAppend2Candidates(firstLevel, s, candidates);
                 if (!lastLevel) 
                 {
-                    Edits2(s, candidates);
+                    Edits2(s, candidates, false, true);
                 }
             }
         }
@@ -464,10 +471,10 @@ void TSpellCorrector::Edits2(str_view_t const & word
             for (auto&& ch: LangModel.GetAlphabet()) 
             {
                 ((s = w.substr(0, i)) += ch) += w.substr(i);
-                LookupAndAppend2Candidates(true, s, candidates);
+                LookupAndAppend2Candidates(firstLevel, s, candidates);
                 if (!lastLevel) 
                 {
-                    Edits2(s, candidates);
+                    Edits2(s, candidates, false, true);
                 }
             }
         }
@@ -691,7 +698,6 @@ TSpellCorrector::sent_range TSpellCorrector::GetSentenceRange(
 void TSpellCorrector::Score(bool const force_orig_word_score
     , word_seq_range_t const & orig_sent
     , std::size_t const pos
-    , bool const firstLevel
     , words_seq_t & candidates
 ) const
 {
@@ -705,7 +711,6 @@ void TSpellCorrector::Score(bool const force_orig_word_score
         curr_word = cand;
         double const sc = LangModel.Score(cand_sent.begin(), cand_sent.end());
         cand.weight = (orig_word_is_known) ?
-            //    ((firstLevel) ? (sc - KnownWordsPenalty) : (sc * SecondLvlPenFactor)) 
                 ((cand.first_level) ? (sc - KnownWordsPenalty) : (sc * SecondLvlPenFactor)) 
             :   (sc - UnknownWordsPenalty);
     }
@@ -734,14 +739,14 @@ words_seq_t TSpellCorrector::Merge(words_seq_t const & a, words_seq_t const & b)
 words_seq_t TSpellCorrector::ProcessCandidates(bool const force_orig_word_score
     , word_seq_range_t const & orig_sent
     , size_t const position
+    , bool const firstLevel 
 ) const
 {
     word_info_t & orig_word = orig_sent[position];
     words_seq_t cands;
     TCandMgr scoredCandidates (cands, MaxCandidatesToCheck);   
-    bool firstLevel = true;     
     FormEditsCandidates(orig_word, scoredCandidates, firstLevel);
-    Score(force_orig_word_score, orig_sent, position, firstLevel, cands);
+    Score(force_orig_word_score, orig_sent, position, cands);
     return cands;
 }
 
