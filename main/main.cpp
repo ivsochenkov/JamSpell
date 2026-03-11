@@ -88,7 +88,7 @@ int Fix(const std::string& modelFile,
             std::wstring const & result = corrector.FixFragment(text);
             out << wide_to_utf8(result) << '\n' << std::flush;
             
-            if (lcnt % 1000 == 0)
+            if (lcnt % 100 == 0)
             {
                 uint64_t currTime = GetCurrentTimeMs();
                 if( currTime - lastTime > 5000)
