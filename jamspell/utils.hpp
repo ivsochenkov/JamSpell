@@ -15,7 +15,7 @@
 #include <type_traits>
 #include <functional>
 
-#ifdef DEBUG
+#if defined(DEBUG) || defined(JS_TRACE)
 #define JS_TRACE_MSG(arg) arg
 #else
 #define JS_TRACE_MSG(arg) 

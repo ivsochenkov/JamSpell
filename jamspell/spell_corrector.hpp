@@ -60,7 +60,6 @@ private:
     
 
     impl_type         & m_impl;
-    std::wstring_view   m_orig;
     std::size_t const   m_max_cnt;
     
 
@@ -121,14 +120,11 @@ private:
 
     void FormEditsCandidates(word_info_t const & word
         , TCandMgr & candidates
-        , bool const firstLevel
     ) const;
 
     void Edits(str_view_t const & word, TCandMgr & candidates) const;
     void Edits2(str_view_t const & word
         , TCandMgr & candidates
-        , bool const firstLevel
-        , bool const lastLevel = true
     ) const;
 
     void InsertsImpl(str_view_t const& w
@@ -160,18 +156,17 @@ private:
         , std::size_t const pos
     ) const;
 
-    void Score(bool const force_orig_word_score
+    void Score(bool const orig_word_is_known
         , word_seq_range_t const & orig_sent
         , std::size_t const sz
         , words_seq_t & candidates
     ) const;
 
-    words_seq_t Merge(words_seq_t const & a, words_seq_t const & b) const;
+    void Merge(words_seq_t & a, words_seq_t & b) const;
 
-    words_seq_t ProcessCandidates(bool const force_orig_word_score
+    words_seq_t ProcessCandidates(bool const orig_word_is_known
         , word_seq_range_t const & orig_sent
         , size_t const position
-        , bool const firstLevel
     ) const;
 
 private:
@@ -180,12 +175,12 @@ private:
     std::unique_ptr<TBloomFilter>   Deletes1;
     std::unique_ptr<TBloomFilter>   Deletes2;
 
-    double      KnownWordsPenalty = 15.0        // 20
-            ,   UnknownWordsPenalty = 5.0       // 5
-            ,   SecondLvlPenFactor = 35.0       // 50
+    double      OrigWordIsKnownPenalty = 30.0   // 20   
+            ,   OrigWordIsUnknownPenalty = 5.0  // 5    
+            ,   SecondLvlPenFactor = 55.0       // 50
             ;
 
-    size_t      MaxCandidatesToCheck = 128;
+    size_t      MaxCandidatesToCheck = 32;
 
 };
 

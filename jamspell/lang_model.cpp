@@ -475,13 +475,12 @@ double TLangModel::Score(word_info_t const * beg, word_info_t const * e) const
     word_info_t const * next1{ beg + 1}, * next2{ next1 + 1};
     do 
     {
-        result += std::log(CalcGram1Prob(*beg));
+        result += std::log2l(CalcGram1Prob(*beg));
         word_info_t const * pN1 = (next1 < e) ? next1: &unkn_wi;
-        result += std::log(CalcGram2Prob(*beg, *pN1 ));
+        result += std::log2l(CalcGram2Prob(*beg, *pN1 ));
         word_info_t const * pN2 = (next2 < e) ? next2: &unkn_wi;
-        result += std::log(CalcGram3Prob(*beg, *pN1, *pN2));
-        result += std::log(Calc1StepGram2Prob(*beg, *pN2));
-        // Unimplemented!
+        result += std::log2l(CalcGram3Prob(*beg, *pN1, *pN2));
+        result += std::log2l(Calc1StepGram2Prob(*beg, *pN2));
   
         ++next1;
         ++next2;
