@@ -1,11 +1,11 @@
 #include <iostream>
 #include <cassert>
-#include <cmath>
+
 #include <fstream>
 #include <sstream>
 #include <ostream>
 #include <cstring>
-#include <algorithm>
+
 #include <string_view>
 #include <filesystem>
 #include <array>
@@ -352,7 +352,7 @@ void TLangModel::TGramLoader::CleanupVocabulary()
     word_id_set_type const & wordIds = PopulateWordIds();
     for (auto it = LM.WordToId.begin(), e = LM.WordToId.end()
         ; it != e
-        ; ((it.value().count >= thres ) || 
+        ; ((it.value().cnt >= thres ) || 
             (wordIds.find(it.value().id) != wordIds.end()) 
             )  ? ++it : it = LM.WordToId.erase(it)
     ){}     
@@ -365,14 +365,19 @@ void TLangModel::TGramLoader::CleanupVocabulary()
 static const uint32_t MAX_REAL_NUM = 268435456;
 static const uint32_t MAX_AVAILABLE_NUM = 65536;
 
-inline void AssignWordInfo(word_info_t & tgt, word_info_t && src)
+inline void AssignWordInfo(word_t & tgt, wdata_t const & src)
 {
-    if(!src.unknown())
-    {
-        //tgt = std::move(src); // do not empty tgt.str !!!
-        tgt.id = src.id;
-        tgt.weight = src.weight;
-    }
+    tgt.cnt = src.cnt;
+    tgt.id = src.id;
+    // do not empty tgt.str !!!
+}
+
+inline void AssignWordInfo(cand_word_t & tgt, wdata_t const & src)
+{
+    tgt.cnt = src.cnt;
+    tgt.id = src.id;
+    tgt.kind = ckOrig;
+    // do not empty tgt.str !!!
 }
 
 inline uint16_t PackInt32(uint32_t num) {
@@ -410,6 +415,8 @@ void InitializeBuckets(const T& grams
         buckets[bucket] = data;
     }
 }
+
+
 
 bool TLangModel::Train(const std::string& fileName
     , const std::string& alphabetFile
@@ -468,38 +475,17 @@ bool TLangModel::Train(const std::string& fileName
     return true;
 }
 
-double TLangModel::Score(word_info_t const * beg, word_info_t const * e) const
-{
-    long double result = 0.0;
-    static word_info_t const unkn_wi (TWordId::Unknown);
-    word_info_t const * next1{ beg + 1}, * next2{ next1 + 1};
-    do 
-    {
-        result += std::log2l(CalcGram1Prob(*beg));
-        word_info_t const * pN1 = (next1 < e) ? next1: &unkn_wi;
-        result += std::log2l(CalcGram2Prob(*beg, *pN1 ));
-        word_info_t const * pN2 = (next2 < e) ? next2: &unkn_wi;
-        result += std::log2l(CalcGram3Prob(*beg, *pN1, *pN2));
-        result += std::log2l(Calc1StepGram2Prob(*beg, *pN2));
-  
-        ++next1;
-        ++next2;
-    }
-    while (++beg != e);
-
-    return result;
-}
-
 double TLangModel::Score(text_tokens_t & words) const 
 {
     if (words.empty()) {
         return std::numeric_limits<double>::min();
     }
 
-    words_seq_t txt_words = InitWords(words);
+    words_t txt_words;
+    InitWords(words, txt_words);
     assert(txt_words.size() == words.size());
    
-    return Score(txt_words.data(), txt_words.data() + txt_words.size());
+    return Score(txt_words.begin(), txt_words.end());
 }
 
 double TLangModel::Score(std::wstring const & str ) const 
@@ -575,42 +561,13 @@ std::size_t TLangModel::avg_word_length(std::size_t max_probes) const
     return std::max(unsigned(double(s) / n) + 1u, 1u);
 }
 
-/*
-TWordIds TLangModel::ConvertToIds(text_tokens_t const & txt_tokens) 
-{
-    TWordIds word_ids(txt_tokens.size());
-
-    TIdSentences newSentences(sentences.size());
-    auto sent_it = newSentences.begin();
-    //for (size_t i = 0; i < sentences.size(); ++i) 
-    for(TWords const & words : sentences)
-    {
-        sent_it -> resize(words.size());
-        auto wit = sent_it ->begin();
-        //const TWords& words = sentences[i];
-        //TWordIds wordIds (words.size());
-        //auto wit = wordIds.begin();
-        //for (size_t j = 0; j < words.size(); ++j) 
-        for(TWord const word: words)
-        {
-            //const TWord& word = words[j];
-            //wordIds.push_back(MakeWordId(word));
-            *wit++ = MakeWordId(word);
-        }
-        //newSentences.emplace_back(std::move(wordIds));
-        ++sent_it;
-    }
-    return newSentences;
-}
-*/
-
 TWordId TLangModel::UpdateWordId(str_view_t const & word)
 {
     assert(!word.empty());
     assert(word.size() < 200);
     
     auto insR = WordToId.emplace(word, wdata_t{TWordId (LastWordID), 0u} );
-    insR.first.value().count += 1u;
+    insR.first.value().cnt += 1u;
     LastWordID += insR.second;
     return insR.first.value().id;
 }
@@ -622,41 +579,6 @@ TWordId TLangModel::GetWordId(str_view_t const & word) const
 }
 
 /*
-TWord TLangModel::GetWordById(TWordId wid) const {
-    if (to_underlying( wid ) >= IdToWord.size()) {
-        return TWord();
-    }
-    return TWord(*IdToWord[to_underlying(wid)]);
-}
-*/
-
-/*
-TCount TLangModel::GetWordCount(TWordId wid) const 
-{
-    return GetGram1HashCount(wid);
-}
-*/
-
-words_seq_t TLangModel::InitWords(text_tokens_t & orig_txt_tok) const
-{    
-    words_seq_t words (orig_txt_tok.size(), word_info_t{});
-    words_seq_t::iterator wit = words.begin();
-    for (wstr_view_t const & orig_token : orig_txt_tok)
-    {
-        if((!orig_token.empty()) && !TTokenizer::isSentEnd(orig_token))
-        {
-            str_t al_str = ToAlphabet(Tokenizer.GetAlphabet(), orig_token);
-            if(WellFormedInAlphabet(al_str))
-            {                
-                wit -> str = std::move(al_str);
-                AssignWordInfo(*wit, GetWordInfo(wit -> str));
-            }
-        }
-        ++wit;
-    }
-    return words;
-}
-
 str_t TLangModel::GetWord(str_view_t const & word) const 
 {
     str_t s;
@@ -669,22 +591,20 @@ str_t TLangModel::GetWord(str_view_t const & word) const
     }
     return s;
 }
+*/
 
-word_info_t TLangModel::GetWordInfo(str_view_t const & word) const 
+wdata_t TLangModel::GetWordInfo(str_view_t const & word) const 
 {
-    static word_info_t empty_wi;
     auto it = WordToId.find(word);
-    return (it != WordToId.end()) ? 
-            word_info_t(it.value().id /*, it.key()*/, it.value().count)
-        : empty_wi;
+    return (it != WordToId.end()) ? it.value() : wdata_t {};
 }
 
-long double TLangModel::CalcGram2Prob(word_info_t const & winf1
-    , word_info_t const & winf2
+long double TLangModel::CalcGram2Prob(wdata_t const & winf1
+    , wdata_t const & winf2
 ) const
 {
-    long double countsGram1 = winf1.weight
-        , countsGram2 = winf2.unknown() ? TCount{0} 
+    long double countsGram1 = winf1.cnt
+        , countsGram2 = winf2.unknown() ? cnt_t{0} 
             : GetGramHashCount(TGramKey(winf1.id, winf2.id), PerfectHash, Buckets);
 
     if (countsGram2 > countsGram1)  // (hash collision)
@@ -697,11 +617,11 @@ long double TLangModel::CalcGram2Prob(word_info_t const & winf1
 }
 
 
-long double TLangModel::Calc1StepGram2Prob(word_info_t const & winf1
-    , word_info_t const & winf3
+long double TLangModel::Calc1StepGram2Prob(wdata_t const & winf1
+    , wdata_t const & winf3
 ) const
 {
-    long double countsGram1 = winf1.weight
+    long double countsGram1 = winf1.cnt
         , countsGram2 = winf3.unknown() ? TCount{0} 
         : GetGramHashCount(TGramKey(winf1.id, TWordId::Any, winf3.id), PerfectHash, Buckets);
 
@@ -714,9 +634,9 @@ long double TLangModel::Calc1StepGram2Prob(word_info_t const & winf1
     return countsGram2 / countsGram1;
 }
 
-long double TLangModel::CalcGram3Prob(word_info_t const & winf1
-    , word_info_t const & winf2
-    , word_info_t const & winf3
+long double TLangModel::CalcGram3Prob(wdata_t const & winf1
+    , wdata_t const & winf2
+    , wdata_t const & winf3
 ) const 
 {
     long double countsGram2 = winf2.unknown() ? TCount{0} 

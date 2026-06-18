@@ -223,15 +223,16 @@ GetNextSent(text_tokens_const_iterator_t b
     return boost::make_iterator_range(b, GetNextSentEnd(b, e ));
 }
 
-inline word_seq_range_t MapSentence (words_seq_t & words
+inline candidates_range_t
+MapSentence (candidates_t & contxt
     , text_tokens_t const & orig_txt_tokens
     , text_tokens_const_iterator_range_t const & curr_sent
 )
 {
-    auto wbeg = words.begin(), wend = wbeg;
+    auto wbeg = contxt.begin(), wend = wbeg;
     std::advance(wbeg, std::distance(orig_txt_tokens.begin(), curr_sent.begin()));
     std::advance(wend, std::distance(orig_txt_tokens.begin(), curr_sent.end()));
-    return word_seq_range_t(wbeg, wend);
+    return candidates_range_t{wbeg, wend};
 }
 
 inline std::size_t getOffset(wchar_t const * pos

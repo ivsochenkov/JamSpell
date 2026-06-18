@@ -16,7 +16,7 @@ std::string GetCandidates(const NJamSpell::TSpellCorrector& corrector,
     
     text_tokens_t orig_txt_tokens = corrector.GetLangModel().GetTokenizer().Parse(orig_txt);
     corrector.GetLangModel().GetTokenizer().FilterAndJoin(orig_txt_tokens);
-    words_seq_t txt_words = corrector.GetLangModel().InitWords(orig_txt_tokens);
+    candidates_t txt_words = corrector.InitContext(orig_txt_tokens);
     assert(txt_words.size() == orig_txt_tokens.size());
 
     nlohmann::json results;
@@ -31,11 +31,11 @@ std::string GetCandidates(const NJamSpell::TSpellCorrector& corrector,
     {
         auto orig_sent = GetNextSent(orig_it, e);
 
-        word_seq_range_t curr_sent(MapSentence(txt_words, orig_txt_tokens, orig_sent));
+        candidates_range_t curr_sent_ctxt(MapSentence(txt_words, orig_txt_tokens, orig_sent));
         std::size_t j = 0;
 
-        for ( auto al_word_it = curr_sent.begin()
-            ; al_word_it != curr_sent.end()
+        for ( auto al_word_it = curr_sent_ctxt.begin()
+            ; al_word_it != curr_sent_ctxt.end()
             ; ++j, ++al_word_it
         ) 
         {
@@ -44,12 +44,12 @@ std::string GetCandidates(const NJamSpell::TSpellCorrector& corrector,
                 continue;
             }
 
-            word_info_t & curr_word = *al_word_it;
-            words_seq_t const &candidates = corrector.GetCandidates(curr_sent, j);
+            cand_word_t & curr_word = *al_word_it;
+            candidates_t candidates {corrector.GetCandidates(curr_sent_ctxt, j)};
             if (!candidates.empty()) 
             {
-                word_info_t const & top_w = candidates.front();
-                if(curr_word.id == top_w.id)
+                cand_word_t & top_w = candidates.front();
+                if(curr_word.score >= top_w.score || curr_word.id == top_w.id)
                 {
                     continue;
                 }
@@ -65,7 +65,7 @@ std::string GetCandidates(const NJamSpell::TSpellCorrector& corrector,
             std::size_t const candidatesSize = std::min(candidates.size(), std::size_t(7));
             for (std::size_t k = 0; k < candidatesSize; ++k) 
             {
-                currentResult["candidates"].push_back(
+                currentResult["candidates"].emplace_back(
                     wide_to_utf8(
                         FromAlphabet(corrector.GetLangModel().GetTokenizer().GetAlphabet()
                         , candidates[k].str

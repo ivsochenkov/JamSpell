@@ -33,123 +33,120 @@ enum class TWordId : uint32_t
 inline constexpr std::underlying_type<TWordId>::type to_underlying(TWordId w)
 {return static_cast<std::underlying_type<TWordId>::type>(w);}
 
+using word_id_t = TWordId;
+
 using TCount = uint32_t;
+using cnt_t = TCount;
 
 using TWordIds = std::vector<TWordId>;
 using TIdSentences = std::vector<TWordIds>;
 
 static constexpr const unsigned MAX_WORD_LENGTH = 64;
 
-/*
-
-struct TWord {
-    TWord() = default;
-    TWord(const wchar_t* ptr, size_t len)
-        : Ptr(ptr)
-        , Len(len)
-    {
-    }
-    TWord(const std::wstring& w)
-        : Ptr(&w[0])
-        , Len(w.size())
-    {
-    }
-
-    TWord(const std::wstring_view& w)
-        : Ptr(&w[0])
-        , Len(w.size())
-    {
-    }
-
-    bool operator ==(const TWord& other) const {
-        return (Ptr == other.Ptr && Len == other.Len);
-    }
-
-    bool empty () const { return !Len; }
-    explicit operator bool () const {return Ptr != nullptr;}
-
-    const wchar_t* Ptr = nullptr;
-    size_t Len = 0;
-};
-
-struct TWordHashPtr {
-public:
-  std::size_t operator()(const TWord& x) const {
-      return (size_t)x.Ptr;
-  }
-};
-
-using TWords = std::vector<TWord>;
-using TSentences = std::vector<TWords>;
-
-struct TScoredWord 
-{
-    TWord Word;
-    double Score = 0;
-
-    explicit TScoredWord (TWord const & w = TWord{}, double sc = 0.0)
-    : Word (w), Score {sc} 
-    {}
-};
-
-using TScoredWords = std::vector<TScoredWord>;
-
-*/
-
 using wstr_view_t = std::wstring_view;
 using str_view_t = std::string_view;
 using str_t = std::string;
 
-struct word_info_t
+struct wdata_t
+{
+    TWordId     id;
+    TCount      cnt;
+
+    explicit wdata_t(word_id_t const i = word_id_t::Unknown, cnt_t const c = 0)
+    :id{i}, cnt {c}
+    {}
+
+    bool unknown() const noexcept { return id == word_id_t::Unknown;}
+
+    explicit operator bool () const noexcept {return !unknown();}
+
+    HANDYPACK(id, cnt)
+};
+
+struct word_t: public wdata_t
 {
     using str_type =        str_t;
 
-    str_type                str;            
-    float                   weight;         
-    TWordId                 id;             
-    bool                    first_level = true;
+    str_type                str;                    
 
-    explicit word_info_t (TWordId const i
-        , str_type const & s
-        , float const w = 0.0
+    word_t (TWordId const i
+        , str_view_t const & s
+        , cnt_t const c = 0
     )
-    : str{s}, weight{w}, id{i}
+    : wdata_t{i, c}, str{s}
     {}
 
-    explicit word_info_t (TWordId const i  = TWordId::Unknown, float const w = 0.0)
-    : str{}, weight{w}, id{i}
+    explicit word_t (word_id_t const i = word_id_t::Unknown, cnt_t const c = 0.0)
+    :  wdata_t{i, c}, str{}
     {}
 
-    explicit word_info_t (str_type const & s )
-    : str{s}, weight{0.0}, id{TWordId::Unknown}
+    word_t (wdata_t const & wd, str_t && s)
+    : wdata_t{wd}, str{std::move(s)}
     {}
 
-    explicit operator bool () const {return !unknown();}
+    //explicit word_t (str_type const & s )
+    //: str{s}, cnt{0}, id{word_id_t::Unknown}
+    //{}
 
-    bool unknown() const {return TWordId::Unknown == id;}
+    void reset(wdata_t const & w)
+    {
+        static_cast<wdata_t &>(*this) = w;
+    }
+
+    wdata_t const & wdata() const {return *this;}
 
 };
 
-using words_seq_t = std::vector<word_info_t>;
-using word_seq_range_t = boost::iterator_range<words_seq_t::iterator>;
+using words_t = std::vector<word_t>;    // orig_word_t
+using words_crange_t = boost::iterator_range<words_t::const_iterator>;
 
-struct word_info_greater_t
+struct orig_word_greater_by_cnt_t
 {
-    bool operator () (word_info_t const & w1, word_info_t const & w2) const
-    { return w1.weight > w2.weight;}
+    bool operator () (word_t const & w1, word_t const & w2) const
+    { return w1.cnt > w2.cnt;}
 };
 
-/*
-words_seq_t::iterator GetNextSentenceEnd(words_seq_t::iterator b
-    , words_seq_t::iterator const & e
-);
-
-
-inline bool isSentEnd(word_info_t const & winf)
+enum cand_kind_t : unsigned char
 {
-    return winf.str.empty();
+        ckNone          = 0u
+    ,   ckOrig                  
+    ,   ckOrigSw                
+    ,   ckFirstLvl          
+    ,   ckSecondLvl         
+    ,   ckFirstLvlSw            
+    ,   ckSecondLvlSw           
+};
+
+inline cand_kind_t NextLevel(cand_kind_t const ck)
+{
+    return cand_kind_t(ck + 1u);
 }
-*/
+
+struct cand_word_t: public word_t
+{
+    float           score;  
+    cand_kind_t     kind    = ckNone;
+
+    cand_word_t (): word_t{} {}
+    
+    cand_word_t (word_id_t const i
+        , str_view_t const & s
+        , cnt_t const c
+        , cand_kind_t const ck
+    )
+    : word_t{i, s, c}, kind{ck} {}
+
+    cand_word_t (wdata_t const & wd
+        , str_t && s
+        , cand_kind_t const k
+    ): word_t{wd, std::move(s)}, kind{k} 
+    {}
+
+};
+
+using candidates_t = std::vector<cand_word_t>;
+using candidates_range_t = boost::iterator_range<candidates_t::iterator>;
+using candidates_crange_t = boost::iterator_range<candidates_t::const_iterator>;
 
 std::string LoadFile(const std::string& fileName);
 void SaveFile(const std::string& fileName, const std::string& data);
@@ -179,9 +176,6 @@ inline std::locale GetLocale ()
     static const std::locale GLocale = std::locale("ru_RU.UTF-8");
     return GLocale;
 }
-
-//std::wstring UTF8ToWide(const std::string& text);
-//std::string WideToUTF8(const std::wstring& text);
 
 uint64_t GetCurrentTimeMs();
 //void ToLower(std::wstring& text);

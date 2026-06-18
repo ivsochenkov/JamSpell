@@ -9,6 +9,8 @@
 #include <utility>
 #include <string>
 #include <limits>
+#include <cmath>
+#include <algorithm>
 #include <type_traits>
 
 #include <contrib/handypack/handypack.hpp>
@@ -25,55 +27,7 @@ constexpr uint64_t LANG_MODEL_MAGIC_BYTE = 8559322735408079686L;
 constexpr uint16_t LANG_MODEL_VERSION = 1;
 constexpr double LANG_MODEL_DEFAULT_K = 0.05;
 
-/*
-struct wstr_hash_t
-{
-    std::size_t operator () (std::wstring_view const & w) const
-    {
-        static std::hash<std::wstring_view > hasher{};
-        return hasher(w); 
-    }
-};
-*/
 
-struct wdata_t
-{
-    TWordId     id;
-    TCount      count;
-
-    explicit wdata_t(TWordId const i = TWordId::Unknown, TCount const c = 0)
-    :id{i}, count {c}
-    {}
-
-    HANDYPACK(id, count)
-};
-
-/*
-
-using wstr_to_id_map_t = tsl::robin_map<std::wstring, wdata_t
-        , wstr_hash_t
-        , std::equal_to<void> //wstr_equal_t
-        , std::allocator<std::pair<std::wstring, TWordId> >
-        , true // store hash
-        , tsl::rh::prime_growth_policy
-    >;
-
-class TRobinSerializer: public NHandyPack::TUnorderedMapSerializer<
-    wstr_to_id_map_t, std::wstring, wdata_t
-> 
-{};
-
-class TRobinHash: public wstr_to_id_map_t 
-{
-public:
-    void Dump(std::ostream& out) const {
-        TRobinSerializer::Dump(out, *this);
-    }
-    void Load(std::istream& in) {
-        TRobinSerializer::Load(in, *this);
-    }
-};
-*/
 
 
 using str_to_id_map_t = tsl::htrie_map<char, wdata_t
@@ -165,14 +119,19 @@ public:
         , train_options_t const & tr_opt = train_options_t::make_default()
     );
 
-    double Score(word_info_t const * beg, word_info_t const * e) const;
+    template <typename TWIt>
+    double Score(TWIt beg, TWIt const & e) const;
+
+    template <typename TWIt>
+    double Score(boost::iterator_range<TWIt> const &r) const
+    {return Score(r.begin(), r.end());}
 
     double Score(text_tokens_t & words) const;
     double Score(std::wstring const & str) const;
 
-    str_t GetWord( str_view_t const & word) const;
+    //str_t GetWord( str_view_t const & word) const;
 
-    word_info_t GetWordInfo(str_view_t const & word) const;
+    wdata_t GetWordInfo(str_view_t const & word) const;
 
     alphabet_type const & GetAlphabet() const { return Tokenizer.GetAlphabet();}
     TTokenizer const & GetTokenizer() const {return Tokenizer;}
@@ -187,7 +146,8 @@ public:
     TWordId UpdateWordId(str_view_t const & word);
     TWordId GetWordId(str_view_t const & word) const;
 
-    words_seq_t InitWords(text_tokens_t & orig_txt_tok) const;
+    template <typename TWords>
+    void InitWords(text_tokens_t const & orig_txt_tok, TWords & wrds) const;
 
     uint64_t GetCheckSum() const {return CheckSum;}
 
@@ -201,22 +161,22 @@ public:
               PerfectHash, Buckets, Tokenizer, CheckSum)
 private:
 
-    long double CalcGram1Prob(word_info_t const & winf) const
+    long double CalcGram1Prob(wdata_t const & winf) const
     {
-        return ((long double )(winf.weight) + K) / (TotalWords + VocabSize);
+        return ((long double )(winf.cnt) + K) / (TotalWords + VocabSize);
     }
     
-    long double CalcGram2Prob(word_info_t const & winf1
-        , word_info_t const & winf2
+    long double CalcGram2Prob(wdata_t const & winf1
+        , wdata_t const & winf2
     ) const;
 
-    long double Calc1StepGram2Prob(word_info_t const & winf1
-        , word_info_t const & winf3
+    long double Calc1StepGram2Prob(wdata_t const & winf1
+        , wdata_t const & winf3
     ) const;
 
-    long double CalcGram3Prob(word_info_t const & winf1
-        , word_info_t const & winf2
-        , word_info_t const & winf3
+    long double CalcGram3Prob(wdata_t const & winf1
+        , wdata_t const & winf2
+        , wdata_t const & winf3
     ) const;
     
     TCount GetGramHashCount(TGramKey const & key
@@ -240,5 +200,54 @@ private:
     uint64_t                    CheckSum;
 };
 
+////////////////////////////////////////////////////////////////////////////////
+
+template <typename TWIt>
+double TLangModel::Score(TWIt beg, TWIt const & e) const
+{
+    double result = 0.0;
+    static wdata_t const unkn_wi {TWordId::Unknown};
+    TWIt next1 {beg}, next2 {beg};
+    std::advance(next1, 1);
+    std::advance(next2, 2);
+    do 
+    {
+        result += std::log2(CalcGram1Prob(*beg));
+        wdata_t const & rN1 = (next1 < e) ? *next1: unkn_wi;
+        result += std::log2(CalcGram2Prob(*beg, rN1 ));
+        wdata_t const & rN2 = (next2 < e) ? *next2: unkn_wi;
+        result += std::log2(CalcGram3Prob(*beg, rN1, rN2));
+        result += std::log2(Calc1StepGram2Prob(*beg, rN2));
+  
+        ++next1;
+        ++next2;
+    }
+    while (++beg != e);
+
+    return result;
+}
+
+template <typename TWords>
+void TLangModel::InitWords(text_tokens_t const & orig_txt_tok, TWords & wrds) const
+{   
+    wrds.resize(orig_txt_tok.size());
+    auto wit = wrds.begin();
+    for (wstr_view_t const & orig_token : orig_txt_tok)
+    {
+        if((!orig_token.empty()) && !TTokenizer::isSentEnd(orig_token))
+        {
+            str_t al_str = ToAlphabet(Tokenizer.GetAlphabet(), orig_token);
+            if(WellFormedInAlphabet(al_str))
+            {                
+                wit -> str = std::move(al_str);
+                wit -> reset (GetWordInfo(wit -> str));
+            }
+        }
+        ++wit;
+    }
+    wrds.resize(std::distance(wrds.begin(), wit));
+}
+
+////////////////////////////////////////////////////////////////////////////////
 
 } // NJamSpell
