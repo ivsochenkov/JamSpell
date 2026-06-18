@@ -96,10 +96,6 @@ bool TSpellCorrector::TrainLangModel(const std::string& textFile
 }
 
 
-// bool TSpellCorrector::WordIsKnown( str_view_t const & word) const 
-// {
-//     return !LangModel.GetWordInfo(word).unknown();
-// }
 
 candidates_t TSpellCorrector::GetCandidates(candidates_range_t const & context
     , size_t const position
@@ -112,7 +108,8 @@ candidates_t TSpellCorrector::GetCandidates(candidates_range_t const & context
     JS_TRACE_MSG(std::cerr << "[debug] Scored orig: \'" 
         << wide_to_utf8_t{}(
             FromAlphabet(GetLangModel().GetTokenizer().GetAlphabet(), orig_word.str)
-        ) << "\' weight = " << orig_word.score << "\n"
+        ) << "\' id = " << static_cast<std::uint32_t> (orig_word.id) 
+        << " count = " << orig_word.cnt << " score = " << orig_word.score << "\n"
     );
 
     candidates_t candidates;
@@ -226,7 +223,7 @@ TSpellCorrector::GetCandidates(const std::vector<std::wstring>& sentence
 
 std::wstring TSpellCorrector::FixFragment(const std::wstring& text) const 
 {
-    JS_TRACE_MSG(std::cerr << "[debug] will fix fragment: \'" 
+    JS_TRACE_MSG(std::cerr << "[debug] Fixing fragment: \'" 
         << wide_to_utf8_t{}(text) << "\'\n"
     );
 
@@ -663,7 +660,7 @@ void TSpellCorrector::Score(candidates_range_t const & context
         JS_TRACE_MSG(std::cerr << "[debug] Scored candidate: \'" 
             << wide_to_utf8_t{}(
                 FromAlphabet(GetLangModel().GetTokenizer().GetAlphabet(), cnd.str)
-            ) << "\' weight = " << cnd.score << "\n"
+            ) << "\' score = " << cnd.score << "\n"
         );
     }
 
