@@ -108,21 +108,22 @@ int main(int argc, const char** argv) {
         return 42;
     }
 
+    static char const * const sContentType = "text/plain; charset=utf-8";
     httplib::Server srv;
     srv.Get("/fix", [&corrector](const httplib::Request& req, httplib::Response& resp) {
-        resp.set_content(FixText(corrector, req.get_param_value("text")) + "\n", "text/plain");
+        resp.set_content(FixText(corrector, req.get_param_value("text")) + "\n", sContentType);
     });
 
     srv.Post("/fix", [&corrector](const httplib::Request& req, httplib::Response& resp) {
-        resp.set_content(FixText(corrector, req.body) + "\n", "text/plain");
+        resp.set_content(FixText(corrector, req.body) + "\n", sContentType);
     });
 
     srv.Get("/candidates", [&corrector](const httplib::Request& req, httplib::Response& resp) {
-        resp.set_content(GetCandidates(corrector, req.get_param_value("text")) + "\n", "text/plain");
+        resp.set_content(GetCandidates(corrector, req.get_param_value("text")) + "\n", sContentType);
     });
 
     srv.Post("/candidates", [&corrector](const httplib::Request& req, httplib::Response& resp) {
-        resp.set_content(GetCandidates(corrector, req.body) + "\n", "text/plain");
+        resp.set_content(GetCandidates(corrector, req.body) + "\n", sContentType);
     });
 
     std::cerr << "[info] starting web server at " << hostname << ":" << port << std::endl;
