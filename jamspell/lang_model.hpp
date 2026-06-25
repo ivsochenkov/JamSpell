@@ -104,12 +104,14 @@ public:
 
     struct train_options_t
     {
-        std::size_t             max_grams_sz        = 300000000;
-        std::array<unsigned, 3> ngram_thresholds    = {9, 6, 4};
+        std::size_t             max_grams_sz        = 100000000;
+        std::array<unsigned, 3> ngram_thresholds    = {7, 5, 3};
                         
-        float                   growth_factor       = 1.005;
+        //float                   growth_factor       = 1.003;
 
         static train_options_t make_default();
+
+        static train_options_t ReadFromEnv();
     };
 
     using alphabet_type = TTokenizer::alphabet_type;
@@ -190,7 +192,7 @@ private:
     //TRobinHash WordToId;
     TWord2IdMap                         WordToId;
     //std::vector<const std::wstring*> IdToWord;
-    std::underlying_type<TWordId>::type LastWordID = to_underlying(TWordId::Any) + 1, 
+    std::underlying_type<TWordId>::type LastWordID = to_underlying(TWordId::Any) + 1u, 
                                         TotalWords = 0,
                                         VocabSize = 0;
 

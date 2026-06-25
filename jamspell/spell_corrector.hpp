@@ -74,7 +74,23 @@ class TSpellCorrector
 
 public:
 
-    static constexpr std::size_t word_cand_list_size_default = 11;
+    struct opt_t
+    {
+        double      OrigWordIsKnownPenalty      = 30.0   // 20   
+                ,   OrigWordIsUnknownPenalty    = 5.0  // 5    
+                ,   SecondLvlPenFactor          = 50.0       // 50
+                ,   SecondLvlPenalty            = 3.0       
+                ,   SwitchedWordPenalty         = 3.0
+                ,   SwitchedWordIsKnownPenalty  = 5.0
+            ;
+
+        ::std::size_t     MaxCandidatesToCheck = 64;
+
+        static opt_t ReadFromEnv();
+    };
+
+
+    explicit TSpellCorrector (opt_t const & opt = opt_t::ReadFromEnv());
 
     bool LoadLangModel(const std::string& modelFile);
     
@@ -89,24 +105,7 @@ public:
         , size_t const position
     ) const;
 
-    /*
-    std::vector<std::wstring> GetCandidates(const std::vector<std::wstring>& sentence
-        , size_t const position
-        , bool const include_orig  = true
-    ) const;
-
-    
-    std::vector<std::pair<std::wstring,double> > GetCandidatesWithScores(
-          const std::vector<std::wstring>& sentence
-        , size_t const position
-        , bool const include_orig  = true
-    ) const;
-    */
-
     std::wstring FixFragment(const std::wstring& text) const;
-    
-    void SetPenalty(double knownWordsPenalty, double unknownWordsPenalty);
-    void SetMaxCandidatesToCheck(size_t maxCandidatesToCheck);
     
     NJamSpell::TLangModel const & GetLangModel() const {return LangModel;}
 
@@ -189,15 +188,7 @@ private:
     std::unique_ptr<TBloomFilter>   Deletes1;
     std::unique_ptr<TBloomFilter>   Deletes2;
 
-    double      OrigWordIsKnownPenalty      = 30.0   // 20   
-            ,   OrigWordIsUnknownPenalty    = 5.0  // 5    
-            ,   SecondLvlPenFactor          = 50.0       // 50
-            ,   SecondLvlPenalty            = 3.0       
-            ,   SwitchedWordPenalty         = 3.0
-            ,   SwitchedWordIsKnownPenalty  = 5.0
-            ;
-
-    size_t      MaxCandidatesToCheck = 64;
+    opt_t const                     m_opt;
 
 };
 

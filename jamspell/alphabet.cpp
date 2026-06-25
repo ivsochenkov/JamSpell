@@ -212,7 +212,7 @@ void ToAlphabet(TAlphabet const & alphabet
 
 str_t ToAlphabet(TAlphabet const & alphabet, std::wstring_view const & src)
 {
-    std::string s;
+    str_t s;
     ToAlphabet(alphabet, src, s);
     return s;
 }

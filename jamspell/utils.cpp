@@ -7,6 +7,8 @@
 #include <iostream>
 #include <cassert>
 #include <algorithm>
+#include <cstdlib>
+#include <cstring>
 
 #include <contrib/cityhash/city.h>
 
@@ -51,6 +53,12 @@ uint16_t CityHash16(const std::string& str) {
 uint16_t CityHash16(const char* str, size_t size) {
     uint32_t hash = CityHash32(str, size);
     return hash % std::numeric_limits<uint16_t>::max();
+}
+
+str_view_t readEnvVal (char const * const env_var_nam)
+{    
+    const char* env_p = std::getenv(env_var_nam);
+    return (env_p != nullptr) ? str_view_t(env_p, ::std::strlen(env_p)) : str_view_t{};
 }
 
 } // NJamSpell

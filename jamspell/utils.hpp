@@ -6,14 +6,18 @@
 
 #include <boost/range/iterator_range.hpp>
 
+#include <boost/container/string.hpp>
+
 #include <string>
 #include <vector>
 #include <string_view>
 #include <locale>
 #include <cstdint>
+#include <charconv>
 #include <limits>
 #include <type_traits>
 #include <functional>
+#include <system_error>
 
 #if defined(DEBUG) || defined(JS_TRACE)
 #define JS_TRACE_MSG(arg) arg
@@ -45,7 +49,8 @@ static constexpr const unsigned MAX_WORD_LENGTH = 64;
 
 using wstr_view_t = std::wstring_view;
 using str_view_t = std::string_view;
-using str_t = std::string;
+//using str_t = std::string;
+using str_t = boost::container::string;
 
 struct wdata_t
 {
@@ -202,5 +207,25 @@ uint16_t CityHash16(const std::string& str);
 uint16_t CityHash16(const char* str, size_t size);
 inline uint16_t CityHash16(std::string_view const & sw) 
 {return CityHash16(sw.data(), sw.size());}
+
+str_view_t readEnvVal (char const * const env_var_nam);
+
+template <typename T>
+inline 
+std::enable_if_t<std::is_integral<T>::value || std::is_floating_point<T>::value, T> 
+getEnvVal (char const * const env_var_nam, T const deflt = T{})
+{
+    T t;
+    auto const & env_val = readEnvVal(env_var_nam);
+    auto r = ::std::from_chars(env_val.data(), env_val.data() + env_val.size(), t);
+    return (r.ec == std::errc())? t : deflt;
+}
+
+template <typename T>
+inline void 
+setValFromEnv (T & val, char const * const env_var_nam)
+{
+    val = getEnvVal(env_var_nam, val);
+}
 
 } // NJamSpell

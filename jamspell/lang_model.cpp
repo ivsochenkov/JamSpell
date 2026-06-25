@@ -1,3 +1,5 @@
+#include <boost/functional/hash/hash.hpp>
+
 #include <iostream>
 #include <cassert>
 
@@ -27,6 +29,18 @@ namespace NJamSpell
 TLangModel::train_options_t TLangModel::train_options_t::make_default()
 {
     return train_options_t{};
+}
+
+TLangModel::train_options_t TLangModel::train_options_t::ReadFromEnv()
+{
+    TLangModel::train_options_t opt{};
+
+    setValFromEnv(opt.max_grams_sz, "SPLL_MAX_GRAMS_SIZE");
+    setValFromEnv(opt.ngram_thresholds[0], "SPLL_1_GRAM_THRS");
+    setValFromEnv(opt.ngram_thresholds[1], "SPLL_2_GRAM_THRS");
+    setValFromEnv(opt.ngram_thresholds[2], "SPLL_3_GRAM_THRS");
+    
+    return opt;
 }
 
 class TLangModel::TGramKey 
@@ -109,7 +123,8 @@ struct TLangModel::TGramLoader
     {
         std::size_t operator()(const TLangModel::TGramKey& x) const 
         {
-            return std::hash<std::string_view>{}(x.bytes());
+            //return std::hash<std::string_view>{}(x.bytes());
+            return boost::hash_range(x.begin(), x.end());
         }
     };
 
@@ -141,7 +156,7 @@ struct TLangModel::TGramLoader
 
     grams_type & grams() {return m_grams;}
 
-    bool Load(const std::string& fName);
+    bool Train(const std::string& fName);
 
 private:
 
@@ -185,10 +200,11 @@ TLangModel::TGramLoader::TGramLoader(TLangModel & lm, train_options_t const & tr
 , trainText_size{0}, sentences_size{0}
 {
     //LM.WordToId.reserve (m_tr_opt.max_grams_sz / 3);
-    m_grams.reserve(m_tr_opt.max_grams_sz * m_tr_opt.growth_factor);
+    //m_grams.reserve(m_tr_opt.max_grams_sz * m_tr_opt.growth_factor);
+    m_grams.reserve(m_tr_opt.max_grams_sz * 1.002);  // some reserve
 }
 
-bool TLangModel::TGramLoader::Load(const std::string& fName)
+bool TLangModel::TGramLoader::Train(const std::string& fName)
 {
     std::cerr << "[info] generating N-grams... " << std::endl;
     std::size_t const file_sz = std::filesystem::file_size(fName);
@@ -210,7 +226,7 @@ bool TLangModel::TGramLoader::Load(const std::string& fName)
             bytes_cnt += (1 + l.size());
             std::wstring trainText (utf8_to_wide(l));                
             ProcessText(trainText);
-            if(( ++lcnt) % 10000u) 
+            if(( ++lcnt) % 1000u) 
             {
                 PrintStatus(lastTime, bytes_cnt, file_sz);
             }
@@ -248,8 +264,6 @@ void TLangModel::TGramLoader::FillGramms(wstr_view_t const & raw_txt
     , wstr_view_t const * b, wstr_view_t const * e
 )
 { 
-    //std::string const & atxt = ToAlphabet(LM.Tokenizer.GetAlphabet(), raw_txt);
-    
     TGramKey gram_key;
     str_t alStr;
     for (bool it_is_all_over = (b == e); (!it_is_all_over) && b != e; ++b )
@@ -260,7 +274,6 @@ void TLangModel::TGramLoader::FillGramms(wstr_view_t const & raw_txt
             ; ++b 
         )
         {
-            //str_view_t const & alStr = Remap(atxt, raw_txt, *b);
             ToAlphabet(LM.Tokenizer.GetAlphabet(), *b, alStr);
             if(!WellFormedInAlphabet(alStr))
             {
@@ -294,6 +307,7 @@ void TLangModel::TGramLoader::FillGramms(wstr_view_t const & raw_txt
     }
     
     ReduceIfNeeded();
+    //Finalize();
 }
 
 void TLangModel::TGramLoader::Reduce ()
@@ -321,10 +335,11 @@ void TLangModel::TGramLoader::Reduce ()
 
     CleanupVocabulary();
 
-    m_tr_opt.max_grams_sz *= m_tr_opt.growth_factor;
+    //m_tr_opt.max_grams_sz *= m_tr_opt.growth_factor;
 
     std::cerr << "--[info] finished reduce of grams: size = " << m_grams.size() 
-        << " new max_grams_sz = "<< m_tr_opt.max_grams_sz << std::endl;
+        //<< " new max_grams_sz = "<< m_tr_opt.max_grams_sz 
+        << std::endl;
 
 }
 
@@ -433,13 +448,12 @@ bool TLangModel::Train(const std::string& fileName
     }
     
     TGramLoader gldr{*this, tr_opt};
-    if(!gldr.Load(fileName))
+    if(!gldr.Train(fileName))
     {
         std::cerr << "[error] failed to load grams" << std::endl;
         return false;
     }
 
-    //VocabSize = gldr.grams().size();
     VocabSize = WordToId.size();
     if(!VocabSize)
     {

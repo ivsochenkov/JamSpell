@@ -78,39 +78,7 @@ std::string GetCandidates(const NJamSpell::TSpellCorrector& corrector,
         orig_it = orig_sent.end();  // !!!
 
     }
-/*
-    for (size_t i = 0; i < sentences.size(); ++i) 
-    {
-        const NJamSpell::TWords& sentence = sentences[i];
-        for (size_t j = 0; j < sentence.size(); ++j) {
-            NJamSpell::TWord currWord = sentence[j];
-            std::wstring wCurrWord(currWord.Ptr, currWord.Len);
-            NJamSpell::TWords candidates = corrector.GetCandidatesRaw(sentence, j);
-            if (candidates.empty()) {
-                continue;
-            }
-            std::wstring firstCandidate(candidates[0].Ptr, candidates[0].Len);
-            if (wCurrWord == firstCandidate) {
-                continue;
-            }
-            nlohmann::json currentResult;
-            currentResult["pos_from"] = currWord.Ptr - &input[0];
-            currentResult["len"] = currWord.Len;
-            currentResult["candidates"] = nlohmann::json::array();
 
-            size_t candidatesSize = std::min(candidates.size(), size_t(7));
-            for (size_t k = 0; k < candidatesSize; ++k) {
-                NJamSpell::TWord candidate = candidates[k];
-                std::string candidateStr = wide_to_utf8(
-                        std::wstring(candidate.Ptr, candidate.Len)
-                );
-                currentResult["candidates"].push_back(candidateStr);
-            }
-
-            results["results"].push_back(currentResult);
-        }
-    }
-    */
     return results.dump(4);
 }
 

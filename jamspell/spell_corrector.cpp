@@ -53,11 +53,34 @@ static del2_vec_t GetDeletes2(str_view_t const & w)
     return results;
 }
 
+
+
 void TCandMgr::reset_heap_impl ()
 {
     static orig_word_greater_by_cnt_t const wheap_order{};
     std::push_heap(m_impl.begin(), m_impl.end(), wheap_order);
     std::pop_heap(m_impl.begin(), m_impl.end(), wheap_order);
+}
+
+TSpellCorrector::opt_t TSpellCorrector::opt_t::ReadFromEnv()
+{
+    opt_t opt{};
+    
+    setValFromEnv(opt.OrigWordIsKnownPenalty, "SPLL_ORIG_WORD_IS_KNOWN_PEN");
+    setValFromEnv(opt.OrigWordIsUnknownPenalty, "SPLL_ORIG_WORD_IS_UNKNOWN_PEN");
+    setValFromEnv(opt.SecondLvlPenFactor, "SPLL_SECOND_LVL_PEN_FACTOR");
+    setValFromEnv(opt.SecondLvlPenalty, "SPLL_SECOND_LVL_PEN");
+    setValFromEnv(opt.SwitchedWordPenalty, "SPLL_SWITCHED_WORD_PEN");
+    setValFromEnv(opt.SwitchedWordIsKnownPenalty, "SPLL_SWITCHED_WORD_IS_KNOWN_PEN");
+
+    setValFromEnv(opt.MaxCandidatesToCheck, "SPLL_MAX_CAND");
+    
+    return opt;
+}
+
+TSpellCorrector::TSpellCorrector (opt_t const & opt)
+: m_opt{opt}
+{
 }
 
 
@@ -113,7 +136,7 @@ candidates_t TSpellCorrector::GetCandidates(candidates_range_t const & context
     );
 
     candidates_t candidates;
-    TCandMgr cndMgr(candidates, MaxCandidatesToCheck);
+    TCandMgr cndMgr(candidates, m_opt.MaxCandidatesToCheck);
    
     FormEditsCandidates(ckFirstLvl, orig_word.str, cndMgr);
     
@@ -297,17 +320,6 @@ std::wstring TSpellCorrector::FixFragment(const std::wstring& text) const
         << wide_to_utf8_t{}(result) << "\'\n"
     );
     return result;
-}
-
-void TSpellCorrector::SetPenalty(double knownWordsPenalty, double unknownWordsPenalty) 
-{
-    OrigWordIsKnownPenalty = knownWordsPenalty;
-    OrigWordIsUnknownPenalty = unknownWordsPenalty;
-}
-
-void TSpellCorrector::SetMaxCandidatesToCheck(size_t maxCandidatesToCheck) 
-{
-    MaxCandidatesToCheck = maxCandidatesToCheck;
 }
 
 
@@ -678,41 +690,41 @@ double TSpellCorrector::ScoreCandidate (double sc
         case ckOrigSw:
         {
             sc = (orig_is_known) ? 
-                (sc - OrigWordIsKnownPenalty) 
-            :   (sc - OrigWordIsUnknownPenalty);
-            sc -= SwitchedWordPenalty;
+                (sc - m_opt.OrigWordIsKnownPenalty) 
+            :   (sc - m_opt.OrigWordIsUnknownPenalty);
+            sc -= m_opt.SwitchedWordPenalty;
             break;
         }
         case ckFirstLvl:
         {
             sc = (orig_is_known) ? 
-                (sc - OrigWordIsKnownPenalty) 
-            :   (sc - OrigWordIsUnknownPenalty);
+                (sc - m_opt.OrigWordIsKnownPenalty) 
+            :   (sc - m_opt.OrigWordIsUnknownPenalty);
             break;
         }               
         case ckSecondLvl:
         {
             sc = (orig_is_known) ? 
-                (sc * SecondLvlPenFactor) 
-            :   (sc - OrigWordIsUnknownPenalty - SecondLvlPenalty);
+                (sc * m_opt.SecondLvlPenFactor) 
+            :   (sc - m_opt.OrigWordIsUnknownPenalty - m_opt.SecondLvlPenalty);
             break;
         }
 
         case ckFirstLvlSw:
         {
             sc = (orig_is_known) ? 
-                (sc - OrigWordIsKnownPenalty) 
-            :   (sc - OrigWordIsUnknownPenalty);
-            sc -= (SwitchedWordPenalty + sw_orig_is_known * SwitchedWordIsKnownPenalty);
+                (sc - m_opt.OrigWordIsKnownPenalty) 
+            :   (sc - m_opt.OrigWordIsUnknownPenalty);
+            sc -= (m_opt.SwitchedWordPenalty + sw_orig_is_known * m_opt.SwitchedWordIsKnownPenalty);
             break;
         }
 
         case ckSecondLvlSw:
         {
             sc = (orig_is_known) ? 
-                (sc * SecondLvlPenFactor) 
-            :   (sc - OrigWordIsUnknownPenalty - SecondLvlPenalty);
-            sc -= (SwitchedWordPenalty + sw_orig_is_known * SwitchedWordIsKnownPenalty);
+                (sc * m_opt.SecondLvlPenFactor) 
+            :   (sc - m_opt.OrigWordIsUnknownPenalty - m_opt.SecondLvlPenalty);
+            sc -= (m_opt.SwitchedWordPenalty + sw_orig_is_known * m_opt.SwitchedWordIsKnownPenalty);
             break;
         }
         default:
