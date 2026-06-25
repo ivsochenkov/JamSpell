@@ -162,10 +162,7 @@ private:
 
     void ProcessText(std::wstring const & trainText );
 
-    void PrintStatus(uint64_t & last_time
-        , std::size_t bytes_cnt
-        , std::size_t file_size
-    );
+    void PrintStatus(uint64_t & last_time, float const prc);
 
     void FillGramms(wstr_view_t const & raw_txt
         , wstr_view_t const * b, wstr_view_t const * e
@@ -228,7 +225,7 @@ bool TLangModel::TGramLoader::Train(const std::string& fName)
             ProcessText(trainText);
             if(( ++lcnt) % 1000u) 
             {
-                PrintStatus(lastTime, bytes_cnt, file_sz);
+                PrintStatus(lastTime, float(bytes_cnt) / file_sz);
             }
         }        
     }
@@ -244,16 +241,13 @@ void TLangModel::TGramLoader::ProcessText(std::wstring const & trainText )
     FillGramms(trainText, tokens.data(), tokens.data() + tokens.size());
 }
 
-void TLangModel::TGramLoader::PrintStatus(uint64_t & last_time
-    , std::size_t bytes_cnt
-    , std::size_t file_size
-)
+void TLangModel::TGramLoader::PrintStatus(uint64_t & last_time, float const prc)
 {
     uint64_t const currTime = GetCurrentTimeMs();
     if (currTime - last_time > 5000) 
     {
         std::cerr << "[info] processed " 
-            << (100.0 * float(bytes_cnt) / float(file_size)) 
+            << (100.0 * prc) 
             << "% ( vocab size = " << LM.WordToId.size() 
             << ", grams_size = " << m_grams.size() << ")\n";
         last_time = currTime;
@@ -359,18 +353,27 @@ TLangModel::TGramLoader::word_id_set_type TLangModel::TGramLoader::PopulateWordI
 
 void TLangModel::TGramLoader::CleanupVocabulary() 
 {
-    std::cerr << "++[info] cleanup vocabulary... size = " 
-        << LM.WordToId.size() << std::endl;
+    std::size_t cnt = 0, dsz = LM.WordToId.size();
+
+    std::cerr << "++[info] cleanup vocabulary... size = " << dsz << std::endl;
 
     unsigned const thres {get_threshold(TGramKey::ngram_type::nGram1)};
 
+    std::uint64_t lastTime = GetCurrentTimeMs();    
     word_id_set_type const & wordIds = PopulateWordIds();
-    for (auto it = LM.WordToId.begin(), e = LM.WordToId.end()
-        ; it != e
+    for (auto it = LM.WordToId.begin()
+        ; it != LM.WordToId.end() // since erase can invalidate iterators!!!
         ; ((it.value().cnt >= thres ) || 
             (wordIds.find(it.value().id) != wordIds.end()) 
             )  ? ++it : it = LM.WordToId.erase(it)
-    ){}     
+    )
+    {
+        if(++cnt % 1000)
+        {
+            PrintStatus(lastTime, float(cnt) / dsz);
+        }
+
+    }     
 
     std::cerr << "++[info] done cleanup vocabulary... size = " 
         << LM.WordToId.size() << std::endl;

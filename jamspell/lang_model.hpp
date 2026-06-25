@@ -118,7 +118,7 @@ public:
 
     bool Train(const std::string& fileName
         , const std::string& alphabetFile
-        , train_options_t const & tr_opt = train_options_t::make_default()
+        , train_options_t const & tr_opt = train_options_t::ReadFromEnv()
     );
 
     template <typename TWIt>
