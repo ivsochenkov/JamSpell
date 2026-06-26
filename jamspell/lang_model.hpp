@@ -98,7 +98,7 @@ class TLangModel
     struct TGramLoader ;
     class TGramKey;
 
-    using buckets_type = std::vector<std::pair<uint16_t, uint16_t>> ;
+    using buckets_type = std::vector<std::pair<::std::uint16_t, ::std::uint16_t>> ;
 
 public:
 
