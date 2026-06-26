@@ -163,6 +163,7 @@ private:
     void ProcessText(std::wstring const & trainText );
 
     void PrintStatus(uint64_t & last_time, float const prc);
+    void PrintDictStatus (uint64_t & last_time, float const prc);
 
     void FillGramms(wstr_view_t const & raw_txt
         , wstr_view_t const * b, wstr_view_t const * e
@@ -223,7 +224,7 @@ bool TLangModel::TGramLoader::Train(const std::string& fName)
             bytes_cnt += (1 + l.size());
             std::wstring trainText (utf8_to_wide(l));                
             ProcessText(trainText);
-            if(( ++lcnt) % 1000u) 
+            if(( ++lcnt) % 1000u == 0) 
             {
                 PrintStatus(lastTime, float(bytes_cnt) / file_sz);
             }
@@ -250,6 +251,18 @@ void TLangModel::TGramLoader::PrintStatus(uint64_t & last_time, float const prc)
             << (100.0 * prc) 
             << "% ( vocab size = " << LM.WordToId.size() 
             << ", grams_size = " << m_grams.size() << ")\n";
+        last_time = currTime;
+    }           
+}
+
+void TLangModel::TGramLoader::PrintDictStatus(uint64_t & last_time, float const prc)
+{
+    uint64_t const currTime = GetCurrentTimeMs();
+    if ((currTime - last_time) >= 5000) 
+    {
+        std::cerr << "[info] cleaning vocab... " 
+            << (100.0 * prc) 
+            << "% ( vocab size = " << LM.WordToId.size();
         last_time = currTime;
     }           
 }
@@ -353,7 +366,8 @@ TLangModel::TGramLoader::word_id_set_type TLangModel::TGramLoader::PopulateWordI
 
 void TLangModel::TGramLoader::CleanupVocabulary() 
 {
-    std::size_t cnt = 0, dsz = LM.WordToId.size();
+    std::size_t cnt = 0; 
+    std::size_t const dsz = LM.WordToId.size();
 
     std::cerr << "++[info] cleanup vocabulary... size = " << dsz << std::endl;
 
@@ -368,9 +382,9 @@ void TLangModel::TGramLoader::CleanupVocabulary()
             )  ? ++it : it = LM.WordToId.erase(it)
     )
     {
-        if(++cnt % 1000)
+        if((++cnt) % 1000 == 0)
         {
-            PrintStatus(lastTime, float(cnt) / dsz);
+            PrintDictStatus(lastTime, float(cnt) / dsz);
         }
 
     }     
