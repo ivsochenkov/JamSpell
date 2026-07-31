@@ -630,47 +630,48 @@ wdata_t TLangModel::GetWordInfo(str_view_t const & word) const
     return (it != WordToId.end()) ? it.value() : wdata_t {};
 }
 
-long double TLangModel::CalcGram2Prob(wdata_t const & winf1
+double TLangModel::CalcGram2Prob(wdata_t const & winf1
     , wdata_t const & winf2
 ) const
 {
-    long double countsGram1 = winf1.cnt
+    double countsGram1 = winf1.cnt
         , countsGram2 = winf2.unknown() ? cnt_t{0} 
             : GetGramHashCount(TGramKey(winf1.id, winf2.id), PerfectHash, Buckets);
 
-    if (countsGram2 > countsGram1)  // (hash collision)
+    if (countsGram2 > countsGram1 )  // (hash collision)
     {
         countsGram2 = 0.0;
     }
-    countsGram1 += TotalWords;
-    countsGram2 += K;
+    countsGram1 += TotalWords;    
+    countsGram2 += K;             
     return countsGram2 / countsGram1;
 }
 
 
-long double TLangModel::Calc1StepGram2Prob(wdata_t const & winf1
+double TLangModel::Calc1StepGram2Prob(wdata_t const & winf1
     , wdata_t const & winf3
 ) const
 {
-    long double countsGram1 = winf1.cnt
+    double countsGram1 = winf1.cnt
         , countsGram2 = winf3.unknown() ? TCount{0} 
         : GetGramHashCount(TGramKey(winf1.id, TWordId::Any, winf3.id), PerfectHash, Buckets);
+
 
     if (countsGram2 > countsGram1)  // (hash collision)
     {
         countsGram2 = 0.0;
     }
-    countsGram1 += TotalWords;
-    countsGram2 += K;
+    countsGram1 += TotalWords;        
+    countsGram2 += K;                 
     return countsGram2 / countsGram1;
 }
 
-long double TLangModel::CalcGram3Prob(wdata_t const & winf1
+double TLangModel::CalcGram3Prob(wdata_t const & winf1
     , wdata_t const & winf2
     , wdata_t const & winf3
 ) const 
 {
-    long double countsGram2 = winf2.unknown() ? TCount{0} 
+    double countsGram2 = winf2.unknown() ? TCount{0} 
         : GetGramHashCount(TGramKey(winf1.id, winf2.id), PerfectHash, Buckets)
     , countsGram3 = winf3.unknown() ? TCount{0}
         :   GetGramHashCount(TGramKey(winf1.id, winf2.id, winf3.id)

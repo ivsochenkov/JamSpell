@@ -124,7 +124,7 @@ candidates_t TSpellCorrector::GetCandidates(candidates_range_t const & context
     , size_t const position
 ) const
 {
-    BOOST_ASSERT_MSG (position < orig_sent.size(), "position is out of range!");
+    BOOST_ASSERT_MSG (position < context.size(), "position is out of range!");
 
     cand_word_t & orig_word = context[position];
     orig_word.score = ScoreOrig(context, position);

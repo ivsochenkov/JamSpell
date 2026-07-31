@@ -25,7 +25,7 @@ namespace NJamSpell
 
 constexpr uint64_t LANG_MODEL_MAGIC_BYTE = 8559322735408079686L;
 constexpr uint16_t LANG_MODEL_VERSION = 1;
-constexpr double LANG_MODEL_DEFAULT_K = 0.05;
+constexpr double LANG_MODEL_DEFAULT_K = 0.01;
 
 
 
@@ -163,20 +163,21 @@ public:
               PerfectHash, Buckets, Tokenizer, CheckSum)
 private:
 
-    long double CalcGram1Prob(wdata_t const & winf) const
+    double CalcGram1Prob(wdata_t const & winf) const
     {
-        return ((long double )(winf.cnt) + K) / (TotalWords + VocabSize);
+        //return (winf.cnt + K) / (TotalWords + VocabSize); // JS_CNT_FIX
+        return (static_cast<double>(winf.cnt) + K) / (TotalWords); 
     }
     
-    long double CalcGram2Prob(wdata_t const & winf1
+    double CalcGram2Prob(wdata_t const & winf1
         , wdata_t const & winf2
     ) const;
 
-    long double Calc1StepGram2Prob(wdata_t const & winf1
+    double Calc1StepGram2Prob(wdata_t const & winf1
         , wdata_t const & winf3
     ) const;
 
-    long double CalcGram3Prob(wdata_t const & winf1
+    double CalcGram3Prob(wdata_t const & winf1
         , wdata_t const & winf2
         , wdata_t const & winf3
     ) const;

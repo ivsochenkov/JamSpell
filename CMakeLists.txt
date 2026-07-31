@@ -11,11 +11,11 @@ find_package(GTest)
 link_directories(${PROJECT_BINARY_DIR}/jamspell)
 include_directories(${CMAKE_SOURCE_DIR})
 
-# find Boost if necessary
-if(USE_BOOST_CONVERT)
-    message(STATUS "Using Boost string convert: Enabled")
-    add_definitions(-DUSE_BOOST_CONVERT)
-endif()
+OPTION (JS_TRACE OFF)
+if(JS_TRACE)
+    message(STATUS "Building with trace: Enabled")
+    add_definitions(-DJS_TRACE)
+endif() 
 
 find_package (Threads REQUIRED)
 set(Boost_USE_MULTITHREADED ON)
