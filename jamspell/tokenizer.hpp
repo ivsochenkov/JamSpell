@@ -13,7 +13,60 @@
 namespace NJamSpell 
 {
 
-using text_tokens_t    = std::vector<std::wstring_view>;
+struct token_info_t
+{
+    using pos_type = ::std::uint32_t;
+    using len_type = ::std::uint32_t;
+
+    explicit token_info_t(wstr_view_t const & txt, pos_type const ofs = -1, len_type const l = 0u)
+    : m_pTxt(&txt), m_ofs{ofs}, m_len{l}
+    {}
+
+    token_info_t () {};
+
+    void reset (pos_type const ofs, len_type const l) 
+    {
+        m_ofs = ofs;
+        m_len = l;
+    }
+
+    void assign(token_info_t const & rhs)
+    {
+        reset(rhs.m_ofs, rhs.m_len);
+    }
+
+    wstr_view_t str() const
+    {
+        return wstr_view_t {m_pTxt -> data() + m_ofs, m_len};
+    }
+
+    constexpr wstr_view_t::const_pointer data() const 
+    {
+        BOOST_ASSERT_MSG(m_pTxt, "Text must not be a nullptr!");
+        return m_pTxt -> data() + m_ofs;
+    }
+
+    constexpr bool empty () const {return !m_len;}
+
+    constexpr wstr_view_t::value_type front () const 
+    {
+        BOOST_ASSERT_MSG(m_pTxt, "Text must not be a nullptr!");
+        return (*m_pTxt)[m_ofs];
+    }
+
+    constexpr pos_type pos () const {return m_ofs;}
+    constexpr pos_type end_pos () const {return m_ofs + m_len;}
+    constexpr len_type size () const {return m_len;}
+    
+private:
+
+    wstr_view_t const *         m_pTxt   = nullptr;
+    pos_type                    m_ofs    = -1;
+    len_type                    m_len    = 0u;
+};
+
+//using text_tokens_t    = std::vector<wstr_view_t>;
+using text_tokens_t    = std::vector<token_info_t>;
 using text_tokens_iterator_t = text_tokens_t::iterator;
 using text_tokens_const_iterator_t = text_tokens_t::const_iterator;
 
@@ -22,13 +75,21 @@ using text_tokens_const_iterator_range_t
 
 class TTokenizer
 {
-    class str_view_t: public std::wstring_view
+    class token_t: public wstr_view_t
     {
     public:
-        void assign(iterator b, iterator e) 
+        void assign(iterator const b, iterator const e) 
         { 
-            static_cast<std::wstring_view &> (*this) 
-                = std::wstring_view(b, std::distance(b, e)); 
+            static_cast<wstr_view_t &> (*this) 
+                = wstr_view_t(b, std::distance(b, e)); 
+        }
+
+        token_info_t make_info (wstr_view_t const & txt) const
+        {
+            return token_info_t{txt
+                , static_cast<token_info_t::pos_type>(std::distance(txt.begin(), this -> begin()))
+                , static_cast<token_info_t::len_type>(this -> size())
+            };
         }
     };
 
@@ -36,7 +97,7 @@ public:
 
     using sep_type = boost::char_separator<wchar_t>;
 
-    using token_type = str_view_t;
+    using token_type = token_t;
 
     using tokenizer_type = boost::tokenizer<sep_type
         , token_type::const_iterator
@@ -44,6 +105,18 @@ public:
     >;
 
     using token_iterator_type = tokenizer_type::iterator;
+
+    static constexpr std::size_t max_word_length = 64;
+/* 
+   ХОЗЯЙКЕ НА ЗАМЕТКУ:
+   Самым длинным словом в русском языке является химический термин 
+   «тетрагидропиранилциклопентилтетрагидропиридопиридиновые» (55 букв)
+
+   Самое длинное слово в английском языке из тех, что записаны в словарях, — это
+   pneumonoultramicroscopicsilicovolcanoconiosis (45 букв), 
+   а абсолютным рекордсменом является химическое название белка титина,
+   состоящее из 189 819 букв.
+*/
 
 private:
 
@@ -55,28 +128,31 @@ private:
     static inline bool isHardSentBreak(wchar_t const ch)
     { return ch == L'!' || ch == L'?'; }
 
-
-    template <typename TTokIt>
-    bool isSentBreak(TTokIt curr_tok_it, TTokIt const & e) const
+    bool isSentBreak(text_tokens_const_iterator_t const curr_tok_it
+        , text_tokens_const_iterator_t const e
+    ) const
     {
-        wchar_t const curr_wch{(*curr_tok_it)[0]};
-        TTokIt next {curr_tok_it}; ++next;
+        wchar_t const curr_wch{curr_tok_it -> front()};
+        text_tokens_const_iterator_t next {curr_tok_it}; ++next;
 
         return isHardSentBreak(curr_wch) 
             || (isSoftSentEnd(curr_wch)
                 &&  (    next == e 
-                    || (isCapitalLetter((*next)[0]) && ( iSpaceDelimited(curr_tok_it, next) ) )
+                    || (isCapitalLetter(next -> front()) 
+                            && ( iSpaceDelimited(curr_tok_it, next) ) )
                     )
                 );
     }
     
-    template <typename TTokIt>
-    bool iSpaceDelimited(TTokIt const & curr_tok_it, TTokIt const & next) const 
-    { return curr_tok_it -> end() < next -> begin();}  
+    bool iSpaceDelimited(text_tokens_const_iterator_t const curr_tok_it
+        , text_tokens_const_iterator_t const next
+    ) const 
+    { return curr_tok_it -> end_pos() < next -> pos();}  
 
-    template <typename TTokIt>
-    bool isNotSpaceDelimited(TTokIt const & curr_tok_it, TTokIt const & next) const 
-    { return curr_tok_it -> end() == next -> begin();}  
+    bool isNotSpaceDelimited(text_tokens_const_iterator_t const curr_tok_it
+        , text_tokens_const_iterator_t const  next
+    ) const 
+    { return curr_tok_it -> end_pos() == next -> pos();}  
 
     bool isCapitalLetter(wchar_t const wch)const 
     {return std::isupper(wch, Locale);}
@@ -84,13 +160,18 @@ private:
     struct join_hyphen_pred_t;
     struct join_pred_t;
 
+    tokenizer_type Tokenize(const std::wstring_view& txt
+        , sep_type const & sep = sep_type{}
+    ) const 
+    { return tokenizer_type(txt.begin(), txt.end(), sep);}
+
 public:
 
     using alphabet_type = TAlphabet;
 
-    static constexpr std::size_t        avg_sent_len_bytes = 37
-                                    ,   avg_sent_len_words = 17
-                                    ,   avg_word_len = 5
+    static constexpr std::size_t        avg_sent_len_bytes = 27
+                                    ,   avg_sent_len_words = 10
+                                    ,   avg_word_len = 4
                                     ;
 
     static constexpr std::size_t get_approx_word_cnt(std::size_t const txt_sz) 
@@ -100,12 +181,7 @@ public:
 
     bool LoadAlphabet(const std::string& alphabetFile);
 
-    tokenizer_type Tokenize(const std::wstring_view& txt
-        , sep_type const & sep = sep_type{}
-    ) const 
-    { return tokenizer_type(txt.begin(), txt.end(), sep);}
-
-    text_tokens_t Parse(const std::wstring_view& txt
+    text_tokens_t Parse(wstr_view_t const & txt
         , sep_type const & sep = sep_type{}
     ) const;
 
@@ -118,11 +194,10 @@ public:
 
     void FilterAndJoinHyphen(text_tokens_t & tokens) const;
 
-    static bool isSentEnd(const std::wstring_view& tok_str)
+    static bool isSentEnd(token_info_t const & t)
     { 
-        return (tok_str.size() == 1 )
-            && (isSoftSentEnd(tok_str.front()) 
-                || isHardSentBreak(tok_str.front())
+        return (t.size() == 1 )
+            && (isSoftSentEnd(t.front()) || isHardSentBreak(t.front())
             );
     }
 
@@ -136,16 +211,15 @@ public:
         return ch == L'-';  // TODO - add more warians here!
     }
 
-    bool isWordToken (wstr_view_t const & tok_str) const
+    bool isWordToken (token_info_t const & token) const
     {
-        return (!tok_str.empty()) 
-            && (tok_str.size() < std::numeric_limits<std::uint8_t>::max()) 
-        && (!isPunct(tok_str.front()));
+        return (!token.empty()) && (token.size() < max_word_length) 
+            && (!isPunct(token.front()));
     }
 
-    bool isGoodWordToken (wstr_view_t const & tok_str) const 
+    bool isGoodWordToken (token_info_t const & token) const 
     {
-        return isWordToken(tok_str);
+        return isWordToken(token);
     }
     
     void Clear();
@@ -169,18 +243,23 @@ void TTokenizer::FilterJoin(TJoinPred && good4Join
     , text_tokens_t & tokens
 ) const
 {
+    if(tokens.empty())
+    {
+        return;
+    }
+
     bool prev_tok_is_good = false;
-    text_tokens_t::iterator tgt_it = tokens.begin();
-    for(text_tokens_t::iterator i = tokens.begin(), e = tokens.end() ; i != e ; ++i)
+    text_tokens_t::iterator tgt_it = tokens.begin(), i = tgt_it, e = tokens.end();
+    do
     {
         if( isGoodWordToken(*i))
         {
-            *tgt_it++ = *i;
+            (tgt_it++) -> assign (*i);
             prev_tok_is_good = true;
         }
-        else if((!i->empty()) && isSentBreak(i, e))
+        else if((!i -> empty()) && isSentBreak(i, e))
         {
-            *tgt_it++ = *i;
+            (tgt_it++) -> assign (*i);
             prev_tok_is_good = false;
         }
         else if (prev_tok_is_good)
@@ -190,10 +269,10 @@ void TTokenizer::FilterJoin(TJoinPred && good4Join
             if(++nxt_it != e)
             {
                 if(std::invoke(std::forward<TJoinPred>(good4Join), --tgt_it, i, nxt_it))
-            
                 {
-                    *tgt_it = wstr_view_t(tgt_it -> data()
-                        , std::distance(tgt_it -> data(), nxt_it -> data() + nxt_it -> size())
+                    tgt_it -> reset (tgt_it -> pos() 
+                        , nxt_it -> pos() + nxt_it -> size() - tgt_it -> pos()
+                        // , std::distance(tgt_it -> data(), nxt_it -> data() + nxt_it -> size())
                     );
                     //prev_tok_is_good = true; // remains true, so don't needed!
                     i = nxt_it;
@@ -206,8 +285,9 @@ void TTokenizer::FilterJoin(TJoinPred && good4Join
             }
         }
     }
+    while ( ++i != e);
 
-    tokens.resize(std::distance(tokens.begin(), tgt_it));   
+    tokens.resize(std::distance(tokens.begin(), tgt_it));
 }
 
 
@@ -235,6 +315,7 @@ MapSentence (candidates_t & contxt
     return candidates_range_t{wbeg, wend};
 }
 
+/*
 inline std::size_t getOffset(wchar_t const * pos
     , std::wstring_view const & src
 )
@@ -248,5 +329,7 @@ inline std::wstring_view getOrigWord(std::wstring const &text
 {
     return std::wstring_view(text).substr(pos, len);
 }
+
+*/
 
 } // NJamSpell

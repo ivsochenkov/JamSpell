@@ -64,14 +64,18 @@ bool TTokenizer::LoadAlphabet(const std::string& alphabetFile)
     return Alphabet.LoadFromFile(alphabetFile);
 }
 
-text_tokens_t TTokenizer::Parse(const std::wstring_view& txt
+text_tokens_t TTokenizer::Parse(wstr_view_t const & txt
     , sep_type const & sep 
 ) const
 {
-    tokenizer_type const & tok(Tokenize(txt, sep));
+    tokenizer_type const & tokens(Tokenize(txt, sep));
     text_tokens_t ret;
     ret.reserve(1u + txt.size() / avg_word_len);
-    ret.assign(tok.begin(), tok.end());
+    //ret.assign(tok.begin(), tok.end());
+    for (token_type const & token: tokens)
+    {
+        ret.emplace_back(token.make_info(txt));
+    }
     return ret;
 }
 

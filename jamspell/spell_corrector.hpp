@@ -113,14 +113,18 @@ public:
 
 private:
 
+    TAlphabet const & GetAlphabet() const
+    { return GetLangModel().GetTokenizer().GetAlphabet(); }
+
     void AppendWithCase(std::wstring & result
-        , std::wstring_view const & origWord
+        , wstr_view_t const & origWord
         , str_view_t const & newWord
     ) const;
 
     str_t PuntoSwitcher(str_view_t const &w) const;
 
-    void FormEditsCandidates(cand_kind_t const ck
+    void FormEditsCandidates(bool const orig_is_known
+        , cand_kind_t const ck
         , str_view_t const & s
         , TCandMgr & result
     ) const;

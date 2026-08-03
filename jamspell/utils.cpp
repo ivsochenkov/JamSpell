@@ -33,18 +33,6 @@ uint64_t GetCurrentTimeMs() {
     return ms.count();
 }
 
-static const std::ctype<wchar_t>& GWctype = std::use_facet<std::ctype<wchar_t>>(GetLocale () );
-
-wchar_t MakeLower(wchar_t orig)
-{
-    return GWctype.tolower(orig);
-}
-
-wchar_t MakeUpper(wchar_t orig)
-{
-    return GWctype.toupper(orig);
-}
-
 uint16_t CityHash16(const std::string& str) {
     uint32_t hash = CityHash32(&str[0], str.size());
     return hash % std::numeric_limits<uint16_t>::max();

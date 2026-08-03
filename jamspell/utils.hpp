@@ -156,6 +156,8 @@ using candidates_crange_t = boost::iterator_range<candidates_t::const_iterator>;
 std::string LoadFile(const std::string& fileName);
 void SaveFile(const std::string& fileName, const std::string& data);
 
+uint64_t GetCurrentTimeMs();
+
 struct utf8_to_wide_t
 {
     std::wstring operator () (std::string const & text) 
@@ -182,14 +184,27 @@ inline std::locale GetLocale ()
     return GLocale;
 }
 
-uint64_t GetCurrentTimeMs();
-//void ToLower(std::wstring& text);
-wchar_t MakeLower(wchar_t orig);
-wchar_t MakeUpper(wchar_t orig);
-
-inline wchar_t MakeUpperIfRequired(wchar_t orig, wchar_t sample) 
+inline std::ctype<wchar_t> const & GetWCtype()
 {
-    return (MakeUpper(sample) == sample) ? MakeUpper(orig) : orig;
+    static std::ctype<wchar_t> const & GWctype 
+        = std::use_facet<std::ctype<wchar_t> >(GetLocale () );
+    return GWctype;
+}
+
+inline wchar_t MakeLower(wchar_t orig)
+{
+    return GetWCtype().tolower(orig);
+}
+
+inline wchar_t MakeUpper(wchar_t orig)
+{
+    return GetWCtype().toupper(orig);
+}
+
+inline wchar_t MakeUpperIfRequired(wchar_t const orig, wchar_t const sample) 
+{
+    return GetWCtype().is(std::ctype_base::upper, sample) ? MakeUpper(orig) : orig;
+    // return (MakeUpper(sample) == sample) ? MakeUpper(orig) : orig;
 }
 
 inline str_view_t Remap(str_view_t const & atxt

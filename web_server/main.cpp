@@ -54,12 +54,12 @@ std::string GetCandidates(const NJamSpell::TSpellCorrector& corrector,
                     continue;
                 }
             }
-
-            size_t const currOrigPos = getOffset(orig_sent[j].data(), orig_txt);
+           
             nlohmann::json currentResult;
             
-            currentResult["pos_from"] = currOrigPos;
-            currentResult["len"] = orig_sent[j].size();
+            token_info_t const & orig_token = orig_sent[j];
+            currentResult["pos_from"] = orig_token.pos();
+            currentResult["len"] = orig_token.size();
             currentResult["candidates"] = nlohmann::json::array();
 
             std::size_t const candidatesSize = std::min(candidates.size(), std::size_t(7));

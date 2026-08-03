@@ -235,11 +235,11 @@ void TLangModel::InitWords(text_tokens_t const & orig_txt_tok, TWords & wrds) co
 {   
     wrds.resize(orig_txt_tok.size());
     auto wit = wrds.begin();
-    for (wstr_view_t const & orig_token : orig_txt_tok)
+    for (token_info_t const & orig_token : orig_txt_tok)
     {
         if((!orig_token.empty()) && !TTokenizer::isSentEnd(orig_token))
         {
-            str_t al_str = ToAlphabet(Tokenizer.GetAlphabet(), orig_token);
+            str_t al_str = ToAlphabet(Tokenizer.GetAlphabet(), orig_token.str());
             if(WellFormedInAlphabet(al_str))
             {                
                 wit -> str = std::move(al_str);

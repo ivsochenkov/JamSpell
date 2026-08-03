@@ -166,7 +166,8 @@ private:
     void PrintDictStatus (uint64_t & last_time, float const prc);
 
     void FillGramms(wstr_view_t const & raw_txt
-        , wstr_view_t const * b, wstr_view_t const * e
+        , text_tokens_const_iterator_t b
+        , text_tokens_const_iterator_t const & e
     );
 
     void Reduce ();
@@ -239,7 +240,7 @@ void TLangModel::TGramLoader::ProcessText(std::wstring const & trainText )
     auto tokens = LM.Tokenizer.Parse(trainText);
     //ToLower(trainText);
     LM.Tokenizer.FilterAndJoinHyphen(tokens);
-    FillGramms(trainText, tokens.data(), tokens.data() + tokens.size());
+    FillGramms(trainText, tokens.begin(), tokens.end());
 }
 
 void TLangModel::TGramLoader::PrintStatus(uint64_t & last_time, float const prc)
@@ -268,7 +269,8 @@ void TLangModel::TGramLoader::PrintDictStatus(uint64_t & last_time, float const 
 }
 
 void TLangModel::TGramLoader::FillGramms(wstr_view_t const & raw_txt
-    , wstr_view_t const * b, wstr_view_t const * e
+    , text_tokens_const_iterator_t b
+    , text_tokens_const_iterator_t const & e
 )
 { 
     TGramKey gram_key;
@@ -281,7 +283,7 @@ void TLangModel::TGramLoader::FillGramms(wstr_view_t const & raw_txt
             ; ++b 
         )
         {
-            ToAlphabet(LM.Tokenizer.GetAlphabet(), *b, alStr);
+            ToAlphabet(LM.Tokenizer.GetAlphabet(), b -> str(), alStr);
             if(!WellFormedInAlphabet(alStr))
             {
                 c = 0;
