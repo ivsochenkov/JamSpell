@@ -51,8 +51,6 @@ bool TAlphabet::LoadFromFile (std::string const & fPath)
 
     Reserve();
     
-    utf8_to_wide_t utf8_to_wide{};
-
     strings_type    lines;
 
     m_subst.emplace_back(char(0));             // zero char
@@ -67,7 +65,7 @@ bool TAlphabet::LoadFromFile (std::string const & fPath)
         if(l.empty())
             continue;
 
-        std::wstring lcnverted (utf8_to_wide(l));
+        std::wstring lcnverted (u8_to_w(l));
         wchar_t const chr = lcnverted[0];
         if (isIgnorable(chr)) 
             continue;
@@ -127,7 +125,7 @@ void TAlphabet::LoadLines(strings_type const & lines )
         )
         {
             throw std::runtime_error("bad alpahbet format: ill-formed line \'" 
-                + wide_to_utf8_t{}(*lit) + '\''
+                + w_to_u8(*lit) + '\''
             );
         }
 

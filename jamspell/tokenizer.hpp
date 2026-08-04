@@ -73,6 +73,10 @@ using text_tokens_const_iterator_t = text_tokens_t::const_iterator;
 using text_tokens_const_iterator_range_t 
     = boost::iterator_range<text_tokens_const_iterator_t>;
 
+#if defined(DEBUG) || defined(JS_TRACE)
+std::string Tokens2Str (text_tokens_t const & tokens);
+#endif
+
 class TTokenizer
 {
     class token_t: public wstr_view_t
@@ -157,13 +161,12 @@ private:
     bool isCapitalLetter(wchar_t const wch)const 
     {return std::isupper(wch, Locale);}
 
-    struct join_hyphen_pred_t;
+    struct join_4_train_pred_t;
     struct join_pred_t;
 
-    tokenizer_type Tokenize(const std::wstring_view& txt
+    tokenizer_type Tokenize(wstr_view_t const & txt
         , sep_type const & sep = sep_type{}
-    ) const 
-    { return tokenizer_type(txt.begin(), txt.end(), sep);}
+    ) const;
 
 public:
 
@@ -185,14 +188,16 @@ public:
         , sep_type const & sep = sep_type{}
     ) const;
 
+    
     template <typename TJoinPred>
     void FilterJoin(TJoinPred && good4Join
         , text_tokens_t & tokens
     ) const;
 
-    void FilterAndJoin(text_tokens_t & tokens) const;
+    void Filter4Spell(text_tokens_t & tokens) const;
 
-    void FilterAndJoinHyphen(text_tokens_t & tokens) const;
+    void Filter4Train(text_tokens_t & tokens) const;
+    
 
     static bool isSentEnd(token_info_t const & t)
     { 
@@ -206,10 +211,7 @@ public:
         return std::ispunct(ch, Locale);
     }
 
-    static bool isHyphen(wchar_t const ch)
-    {
-        return ch == L'-';  // TODO - add more warians here!
-    }
+    static bool isA(wchar_t const ch, wchar_t const * chrs);    
 
     bool isWordToken (token_info_t const & token) const
     {
@@ -225,6 +227,8 @@ public:
     void Clear();
 
     alphabet_type const & GetAlphabet() const {return Alphabet;}
+
+    static void FilterHyphen(std::wstring & txt);
 
     HANDYPACK(Alphabet)
 
@@ -290,7 +294,6 @@ void TTokenizer::FilterJoin(TJoinPred && good4Join
     tokens.resize(std::distance(tokens.begin(), tgt_it));
 }
 
-
 text_tokens_const_iterator_t GetNextSentEnd(text_tokens_const_iterator_t b
     , text_tokens_const_iterator_t const & e
 );
@@ -315,21 +318,5 @@ MapSentence (candidates_t & contxt
     return candidates_range_t{wbeg, wend};
 }
 
-/*
-inline std::size_t getOffset(wchar_t const * pos
-    , std::wstring_view const & src
-)
-{
-    return std::distance(&src[0], pos);
-}
-
-inline std::wstring_view getOrigWord(std::wstring const &text
-    , std::size_t pos, std::size_t len
-)
-{
-    return std::wstring_view(text).substr(pos, len);
-}
-
-*/
 
 } // NJamSpell

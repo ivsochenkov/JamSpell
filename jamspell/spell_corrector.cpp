@@ -129,7 +129,7 @@ candidates_t TSpellCorrector::GetCandidates(candidates_range_t const & context
     cand_word_t & orig_word = context[position];
     orig_word.score = ScoreOrig(context, position);
     JS_TRACE_MSG(std::cerr << "[debug] Scored orig: \'" 
-        << wide_to_utf8_t{}(FromAlphabet(GetAlphabet(), orig_word.str)) 
+        << w_to_u8(FromAlphabet(GetAlphabet(), orig_word.str)) 
         << "\' id = " << static_cast<std::uint32_t> (orig_word.id) 
         << " count = " << orig_word.cnt << " score = " << orig_word.score << "\n"
     );
@@ -164,7 +164,7 @@ candidates_t TSpellCorrector::GetCandidates(candidates_range_t const & context
 
     JS_TRACE_MSG(std::cerr << "[debug] Best Candidate: \'" 
         << (candidates.empty() ? std::string{} 
-        : wide_to_utf8_t{}(FromAlphabet(GetAlphabet(), candidates.front().str))
+        : w_to_u8(FromAlphabet(GetAlphabet(), candidates.front().str))
         ) << "\' id = " 
         << (candidates.empty() ? 0u : static_cast<std::uint32_t> (candidates.front().id))
         << " count = " << (candidates.empty() ? 0u : candidates.front().cnt)
@@ -253,15 +253,15 @@ TSpellCorrector::GetCandidates(const std::vector<std::wstring>& sentence
 }
 */
 
-std::wstring TSpellCorrector::FixFragment(const std::wstring& text) const 
+std::wstring TSpellCorrector::FixFragment(std::wstring const & text) const 
 {
     JS_TRACE_MSG(std::cerr << "[debug] Fixing fragment: \'" 
-        << wide_to_utf8_t{}(text) << "\'\n"
+        << w_to_u8(text) << "\'\n"
     );
 
     wstr_view_t const orig_txt(text);
     text_tokens_t orig_txt_tokens = LangModel.GetTokenizer().Parse(orig_txt);
-    LangModel.GetTokenizer().FilterAndJoin(orig_txt_tokens);
+    LangModel.GetTokenizer().Filter4Spell(orig_txt_tokens);
     candidates_t txt_words {InitContext(orig_txt_tokens)};
     assert(txt_words.size() == orig_txt_tokens.size());
 
@@ -326,7 +326,7 @@ std::wstring TSpellCorrector::FixFragment(const std::wstring& text) const
     }
     result += orig_txt.substr(origPos, text.size() - origPos);
     JS_TRACE_MSG(std::cerr << "[debug] fixed result: \'" 
-        << wide_to_utf8_t{}(result) << "\'\n"
+        << w_to_u8(result) << "\'\n"
     );
     return result;
 }
@@ -336,10 +336,10 @@ str_t TSpellCorrector::PuntoSwitcher(str_view_t const &w) const
 { 
     str_t s = FribbulusXax(LangModel.GetAlphabet(), w);
     JS_TRACE_MSG(std::cerr << "[debug] Switched kb-layout for word: \'" 
-        << wide_to_utf8_t{}(
+        << w_to_u8(
             FromAlphabet(GetLangModel().GetTokenizer().GetAlphabet(), w)
         ) << "\' to \'" 
-        << wide_to_utf8_t{}(
+        << w_to_u8(
             FromAlphabet(GetLangModel().GetTokenizer().GetAlphabet(), s)
         ) << "\'\n"
     );
@@ -370,7 +370,7 @@ void TSpellCorrector::Edits(str_view_t const& word
 ) const 
 {
     JS_TRACE_MSG(std::cerr << "[debug] Edits (2-letters) candidates for word: \'" 
-        << wide_to_utf8_t{}(
+        << w_to_u8(
             FromAlphabet(GetLangModel().GetTokenizer().GetAlphabet(), word)
         ) << "\'\n" 
     );
@@ -401,7 +401,7 @@ std::size_t TSpellCorrector::Edits2(str_view_t const & word
 ) const 
 {
     JS_TRACE_MSG(std::cerr << "[debug] Edits (1-letters) candidates for word: \'" 
-        << wide_to_utf8_t{}(
+        << w_to_u8(
             FromAlphabet(GetLangModel().GetTokenizer().GetAlphabet(), word)
         ) << "\'\n" 
     );
@@ -437,8 +437,8 @@ std::size_t TSpellCorrector::Edits2(str_view_t const & word
         {
             TAlphabet::subs_type const & sbt = LangModel.GetAlphabet().GetSubstitutes(w[i]);
             JS_TRACE_MSG(std::cerr << "[debug] substitutes for letter \'"
-                << wide_to_utf8_t{}(std::wstring(1, LangModel.GetAlphabet().Ch2Wch(w[i]))) 
-                << "\': " << wide_to_utf8_t{}(
+                << w_to_u8(std::wstring(1, LangModel.GetAlphabet().Ch2Wch(w[i]))) 
+                << "\': " << w_to_u8(
                     FromAlphabet(LangModel.GetAlphabet(), str_view_t(sbt.data(), sbt.size()) )) 
                 << "\'\n" 
             );
@@ -620,7 +620,7 @@ bool TSpellCorrector::LookupAndAppend2Candidates(str_view_t const & w
     wdata_t const wd = LangModel.GetWordInfo(w);
 
     JS_TRACE_MSG(std::cerr << "[debug] synthesized candidate: \'" 
-        << wide_to_utf8_t{}(
+        << w_to_u8(
             FromAlphabet(GetLangModel().GetTokenizer().GetAlphabet(), w)) 
         << "\' id = " << static_cast<uint32_t>(wd.id) 
         << " count = " << wd.cnt << "\n"
@@ -680,7 +680,7 @@ void TSpellCorrector::Score(candidates_range_t const & context
         */
 
         JS_TRACE_MSG(std::cerr << "[debug] Scored candidate: \'" 
-            << wide_to_utf8_t{}(
+            << w_to_u8(
                 FromAlphabet(GetLangModel().GetTokenizer().GetAlphabet(), cnd.str)
             ) << "\' score = " << cnd.score << "\n"
         );

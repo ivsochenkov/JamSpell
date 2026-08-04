@@ -158,25 +158,18 @@ void SaveFile(const std::string& fileName, const std::string& data);
 
 uint64_t GetCurrentTimeMs();
 
-struct utf8_to_wide_t
+inline std::wstring u8_to_w(str_view_t const & text) 
 {
-    std::wstring operator () (std::string const & text) 
-    {
-        using boost::locale::conv::utf_to_utf;
-        return utf_to_utf<wchar_t>(text.c_str(), text.c_str() + text.size());
-    }
+    using boost::locale::conv::utf_to_utf;
+    return utf_to_utf<wchar_t>(text.data(), text.data() + text.size());
+}
 
-private:
-};
-
-struct wide_to_utf8_t
+inline std::string w_to_u8 (const wstr_view_t & text)
 {
-    std::string operator () (const std::wstring& text)
-    {
-        using boost::locale::conv::utf_to_utf;
-        return utf_to_utf<char>(text.c_str(), text.c_str() + text.size());
-    }
-};
+    using boost::locale::conv::utf_to_utf;
+    return utf_to_utf<char>(text.data(), text.data() + text.size());
+}
+
 
 inline std::locale GetLocale () 
 {

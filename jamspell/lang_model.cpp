@@ -160,13 +160,12 @@ struct TLangModel::TGramLoader
 
 private:
 
-    void ProcessText(std::wstring const & trainText );
+    void ProcessText(std::string const & trainText );
 
     void PrintStatus(uint64_t & last_time, float const prc);
     void PrintDictStatus (uint64_t & last_time, float const prc);
 
-    void FillGramms(wstr_view_t const & raw_txt
-        , text_tokens_const_iterator_t b
+    void FillGramms(text_tokens_const_iterator_t b
         , text_tokens_const_iterator_t const & e
     );
 
@@ -215,16 +214,14 @@ bool TLangModel::TGramLoader::Train(const std::string& fName)
 
     std::size_t lcnt{0}, bytes_cnt{0};
     uint64_t lastTime = GetCurrentTimeMs();
-    std::string l;        
-    utf8_to_wide_t utf8_to_wide{};
+    std::string l;
     while (!in.eof())
     {            
-        std::getline(in, l); 
+        std::getline(in, l);         
         if(!l.empty())
-        {            
+        {
             bytes_cnt += (1 + l.size());
-            std::wstring trainText (utf8_to_wide(l));                
-            ProcessText(trainText);
+            ProcessText(l);
             if(( ++lcnt) % 1000u == 0) 
             {
                 PrintStatus(lastTime, float(bytes_cnt) / file_sz);
@@ -235,12 +232,15 @@ bool TLangModel::TGramLoader::Train(const std::string& fName)
     return lcnt;  
 }
 
-void TLangModel::TGramLoader::ProcessText(std::wstring const & trainText )
+void TLangModel::TGramLoader::ProcessText(std::string const & txt )
 {
+    std::wstring const & trainText = u8_to_w(txt);
     auto tokens = LM.Tokenizer.Parse(trainText);
-    //ToLower(trainText);
-    LM.Tokenizer.FilterAndJoinHyphen(tokens);
-    FillGramms(trainText, tokens.begin(), tokens.end());
+    LM.Tokenizer.Filter4Train(tokens);
+    JS_TRACE_MSG(std::cerr << "[debug] Train text: <<" << txt << ">>\n"
+        << "Tokens:[" << Tokens2Str (tokens) << ']' << std::endl
+    );
+    FillGramms(tokens.begin(), tokens.end());
 }
 
 void TLangModel::TGramLoader::PrintStatus(uint64_t & last_time, float const prc)
@@ -268,8 +268,7 @@ void TLangModel::TGramLoader::PrintDictStatus(uint64_t & last_time, float const 
     }           
 }
 
-void TLangModel::TGramLoader::FillGramms(wstr_view_t const & raw_txt
-    , text_tokens_const_iterator_t b
+void TLangModel::TGramLoader::FillGramms(text_tokens_const_iterator_t b
     , text_tokens_const_iterator_t const & e
 )
 { 
@@ -524,7 +523,7 @@ double TLangModel::Score(text_tokens_t & words) const
 double TLangModel::Score(std::wstring const & str ) const 
 {
     text_tokens_t orig_txt_tokens = GetTokenizer().Parse(str);
-    GetTokenizer().FilterAndJoin(orig_txt_tokens);
+    GetTokenizer().Filter4Spell(orig_txt_tokens);
     return Score(orig_txt_tokens);
 }
 

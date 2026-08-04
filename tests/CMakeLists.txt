@@ -1,5 +1,5 @@
 enable_testing()
 include_directories(${GTEST_INCLUDE_DIRS})
-add_executable(jamspell_tests test_perfect_hash.cpp)
-target_link_libraries(jamspell_tests jamspell_lib ${GTEST_BOTH_LIBRARIES} pthread)
-add_test(jamspell_tests jamspell_tests)
+add_executable(sivspell_tests test_perfect_hash.cpp)
+target_link_libraries(sivspell_tests sivspell_lib ${GTEST_BOTH_LIBRARIES} pthread)
+add_test(sivspell_tests sivspell_tests)

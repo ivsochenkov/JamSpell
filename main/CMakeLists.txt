@@ -1,3 +1,3 @@
 
-add_executable(jamspell main.cpp)
-target_link_libraries(jamspell jamspell_lib)
+add_executable(sivspell main.cpp)
+target_link_libraries(sivspell sivspell_lib)

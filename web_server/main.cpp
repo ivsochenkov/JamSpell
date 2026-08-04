@@ -3,19 +3,19 @@
 #include "contrib/nlohmann/json.hpp"
 #include <cwctype>
 
-std::string GetCandidates(const NJamSpell::TSpellCorrector& corrector,
-                          const std::string& text)
+std::string GetCandidates(const NJamSpell::TSpellCorrector& corrector
+    , std::string const & text
+)
 {
     using namespace NJamSpell;
 
-    utf8_to_wide_t utf8_to_wide;
-    wide_to_utf8_t wide_to_utf8;
-    std::wstring const input = utf8_to_wide(text); 
+    std::wstring input = u8_to_w(text);
+    corrector.GetLangModel().GetTokenizer().FilterHyphen(input);
     
-    std::wstring_view const orig_txt(input);
+    wstr_view_t const orig_txt(input);
     
     text_tokens_t orig_txt_tokens = corrector.GetLangModel().GetTokenizer().Parse(orig_txt);
-    corrector.GetLangModel().GetTokenizer().FilterAndJoin(orig_txt_tokens);
+    corrector.GetLangModel().GetTokenizer().Filter4Spell(orig_txt_tokens);
     candidates_t txt_words = corrector.InitContext(orig_txt_tokens);
     assert(txt_words.size() == orig_txt_tokens.size());
 
@@ -65,9 +65,8 @@ std::string GetCandidates(const NJamSpell::TSpellCorrector& corrector,
             std::size_t const candidatesSize = std::min(candidates.size(), std::size_t(7));
             for (std::size_t k = 0; k < candidatesSize; ++k) 
             {
-                currentResult["candidates"].emplace_back(
-                    wide_to_utf8(
-                        FromAlphabet(corrector.GetLangModel().GetTokenizer().GetAlphabet()
+                currentResult["candidates"].emplace_back(w_to_u8(
+                    FromAlphabet(corrector.GetLangModel().GetTokenizer().GetAlphabet()
                         , candidates[k].str
                     )
                 ));
@@ -85,10 +84,8 @@ std::string GetCandidates(const NJamSpell::TSpellCorrector& corrector,
 std::string FixText(const NJamSpell::TSpellCorrector& corrector,
                     const std::string& text)
 {
-    NJamSpell::utf8_to_wide_t utf8_to_wide;
-    NJamSpell::wide_to_utf8_t wide_to_utf8;
-    std::wstring input = utf8_to_wide(text);
-    return wide_to_utf8(corrector.FixFragment(input));
+    using namespace NJamSpell;
+    return w_to_u8(corrector.FixFragment(u8_to_w(text)));
 }
 
 int main(int argc, const char** argv) {
@@ -103,7 +100,8 @@ int main(int argc, const char** argv) {
 
     NJamSpell::TSpellCorrector corrector;
     std::cerr << "[info] loading model" << std::endl;
-    if (!corrector.LoadLangModel(modelFile)) {
+    if (!corrector.LoadLangModel(modelFile)) 
+    {
         std::cerr << "[error] failed to load model" << std::endl;
         return 42;
     }
