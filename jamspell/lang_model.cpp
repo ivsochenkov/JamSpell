@@ -263,7 +263,7 @@ void TLangModel::TGramLoader::PrintDictStatus(uint64_t & last_time, float const 
     {
         std::cerr << "[info] cleaning vocab... " 
             << (100.0 * prc) 
-            << "% ( vocab size = " << LM.WordToId.size();
+            << "% ( vocab size = " << LM.WordToId.size() << std::endl;
         last_time = currTime;
     }           
 }

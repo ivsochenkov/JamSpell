@@ -190,9 +190,16 @@ public:
 
     
     template <typename TJoinPred>
-    void FilterJoin(TJoinPred && good4Join
+    void FilterJoin2(TJoinPred && good4Join
         , text_tokens_t & tokens
     ) const;
+
+    template <typename TJoinPred>
+    void FilterJoin3(TJoinPred && good4Join
+        , text_tokens_t & tokens
+    ) const;
+
+    
 
     void Filter4Spell(text_tokens_t & tokens) const;
 
@@ -243,7 +250,59 @@ private:
 ////////////////////////////////////////////////////////////////////////////////
 
 template <typename TJoinPred>
-void TTokenizer::FilterJoin(TJoinPred && good4Join
+void TTokenizer::FilterJoin3(TJoinPred && good4Join
+    , text_tokens_t & tokens
+) const
+{
+    if(tokens.empty())
+    {
+        return;
+    }
+
+    bool prev_tok_is_good = false;
+    text_tokens_t::iterator tgt_it = tokens.begin(), i = tgt_it, e = tokens.end();
+    do
+    {
+        if( isGoodWordToken(*i))
+        {
+            (tgt_it++) -> assign (*i);
+            prev_tok_is_good = true;
+        }
+        else if((!i -> empty()) && isSentBreak(i, e))
+        {
+            (tgt_it++) -> assign (*i);
+            prev_tok_is_good = false;
+        }
+        else if (prev_tok_is_good)
+        {
+            // try to join!
+            text_tokens_t::iterator nxt_it = i;
+            if(++nxt_it != e)
+            {
+                if(std::invoke(std::forward<TJoinPred>(good4Join), --tgt_it, i, nxt_it))
+                {
+                    tgt_it -> reset (tgt_it -> pos() 
+                        , nxt_it -> pos() + nxt_it -> size() - tgt_it -> pos()
+                        // , std::distance(tgt_it -> data(), nxt_it -> data() + nxt_it -> size())
+                    );
+                    //prev_tok_is_good = true; // remains true, so don't needed!
+                    i = nxt_it;
+                }
+                else
+                {
+                    prev_tok_is_good = false;  // i is not good
+                }
+                ++tgt_it;
+            }
+        }
+    }
+    while ( ++i != e);
+
+    tokens.resize(std::distance(tokens.begin(), tgt_it));
+}
+
+template <typename TJoinPred>
+void TTokenizer::FilterJoin2(TJoinPred && good4Join
     , text_tokens_t & tokens
 ) const
 {

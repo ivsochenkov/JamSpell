@@ -60,12 +60,12 @@ struct TTokenizer::join_pred_t
 
 void TTokenizer::Filter4Spell(text_tokens_t & tokens) const
 {
-    FilterJoin(join_pred_t{*this}, tokens);
+    FilterJoin2(join_pred_t{*this}, tokens);
 }
 
 void TTokenizer::Filter4Train(text_tokens_t & tokens) const
 {
-    FilterJoin(join_4_train_pred_t{*this}, tokens);
+    FilterJoin3(join_4_train_pred_t{*this}, tokens);
 }
 
 TTokenizer::tokenizer_type 
