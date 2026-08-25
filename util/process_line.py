@@ -3,7 +3,11 @@
 process_line.py — построчная обработка корпуса (читает stdin, пишет stdout):
   1) склеивает слова, разорванные дефисом-артефактом переноса
      ("соответствен-ный" -> "соответственный", "шо-ковый" -> "шоковый");
-  2) отфильтровывает строки, где доля несловарных/ошибочных слов > threshold
+  2) разделяет слово и слипшиеся с ним без пробела цифры — типичный случай
+     "фамилия + номер аффилиации" ("Иванов3" -> "Иванов 3", "Петров1,2" ->
+     "Петров 1,2"). Аббревиатуры/бренды вида "COVID19", "IPv4", "iPhone15"
+     не трогаются, т.к. их буквенная часть не является словарным словом;
+  3) отфильтровывает строки, где доля несловарных/ошибочных слов > threshold
      (hunspell, словари ru_RU + en_US). Отдельного определения языка нет:
      строки на украинском/белорусском и т.п. отсеиваются тем же порогом —
      специфичные буквы (і, ї, є, ґ, ў) и большая часть лексики этих языков
@@ -25,6 +29,9 @@ import hunspell
 WORD_RE = re.compile(r"[A-Za-zА-Яа-яЁё]+")
 # Кандидат на "склейку через дефис": две буквенные части, дефис без пробелов.
 HYPHEN_RE = re.compile(r"\b([A-Za-zА-Яа-яЁё]+)-([A-Za-zА-Яа-яЁё]+)\b")
+# Кандидат на "слово+число без пробела": буквы (мин. 2), затем цифры,
+# возможно несколько номеров через запятую без пробела ("Иванов1,2").
+NUMBER_SUFFIX_RE = re.compile(r"\b([A-Za-zА-Яа-яЁё]{2,})(\d+(?:,\d+)*)\b")
 
 
 def parse_args():
@@ -33,6 +40,8 @@ def parse_args():
                     help="максимально допустимая доля несловарных слов в строке")
     p.add_argument("--min-words", type=int, default=1,
                     help="строки с меньшим числом слов пропускаются без фильтра по доле ошибок")
+    p.add_argument("--number-suffix-min-len", type=int, default=2,
+                    help="мин. длина буквенной части, чтобы применять разделение слово+число (по умолчанию 2)")
     p.add_argument("--ru-dic", default="/usr/share/hunspell/ru_RU.dic")
     p.add_argument("--ru-aff", default="/usr/share/hunspell/ru_RU.aff")
     p.add_argument("--en-dic", default="/usr/share/hunspell/en_US.dic")
@@ -85,6 +94,27 @@ def fix_hyphen_artifacts(line: str, spell: SpellChecker) -> str:
     return HYPHEN_RE.sub(repl, line)
 
 
+def fix_number_suffix(line: str, spell: SpellChecker, min_len: int = 2) -> str:
+    """
+    Разделяет слово и слипшиеся с ним цифры пробелом: "Иванов3" -> "Иванов 3",
+    "Петров1,2" -> "Петров 1,2" (несколько номеров аффилиаций через запятую).
+
+    Разделяем только если буквенная часть — словарное слово (ru или en);
+    иначе буква+цифры считаем осмысленным единым токеном (аббревиатуры и
+    названия вроде "COVID19", "IPv4", "iPhone15", "Ту154") и не трогаем.
+    Однобуквенные/очень короткие "слова" (min_len) не разделяем — слишком
+    велик риск ложных срабатываний на условных обозначениях ("A4", "п3").
+    """
+
+    def repl(m: re.Match) -> str:
+        word, digits = m.group(1), m.group(2)
+        if len(word) >= min_len and spell.is_known(word):
+            return f"{word} {digits}"
+        return m.group(0)
+
+    return NUMBER_SUFFIX_RE.sub(repl, line)
+
+
 def bad_word_ratio(words, spell: SpellChecker) -> float:
     if not words:
         return 0.0
@@ -96,8 +126,25 @@ def main():
     args = parse_args()
     spell = SpellChecker(args.ru_dic, args.ru_aff, args.en_dic, args.en_aff)
 
+    # Читаем stdin как БАЙТЫ и декодируем построчно вручную. Это защищает от
+    # двух ситуаций, которые иначе роняют весь worker с UnicodeDecodeError:
+    #   1) исходный файл содержит невалидные/битые UTF-8 байты (мусор от
+    #      скрапинга, смешанные кодировки и т.п.);
+    #   2) `parallel --pipepart` режет файл по байтовым офсетам — если
+    #      где-то рядом с границей блока данные и так не были чистым UTF-8,
+    #      декодер может упасть ровно на стыке.
+    # errors="replace" меняет битый байт на U+FFFD и НЕ прерывает обработку
+    # остальной части строки/файла; regex для слов такой символ просто
+    # проигнорирует, т.к. он не входит в [A-Za-zА-Яа-яЁё].
     out = sys.stdout
-    for raw_line in sys.stdin:
+    decode_errors = 0
+    for raw_bytes in sys.stdin.buffer:
+        try:
+            raw_line = raw_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            raw_line = raw_bytes.decode("utf-8", errors="replace")
+            decode_errors += 1
+
         line = raw_line.rstrip("\n")
         if not line.strip():
             continue
@@ -105,7 +152,10 @@ def main():
         # 1) склейка дефисных артефактов переноса
         line = fix_hyphen_artifacts(line, spell)
 
-        # 2) доля несловарных/ошибочных слов (этот же порог отсеивает и
+        # 2) разделение слипшихся "слово+число" (фамилия+аффилиация и т.п.)
+        line = fix_number_suffix(line, spell, min_len=args.number_suffix_min_len)
+
+        # 3) доля несловарных/ошибочных слов (этот же порог отсеивает и
         #    строки на других языках — укр./бел./польск. и т.п., т.к. их
         #    лексика почти не пересекается с ru_RU/en_US)
         words = WORD_RE.findall(line)
@@ -116,6 +166,10 @@ def main():
             continue
 
         out.write(line + "\n")
+
+    if decode_errors:
+        print(f"[process_line.py] строк с проблемами кодировки: {decode_errors}",
+              file=sys.stderr)
 
 
 if __name__ == "__main__":
