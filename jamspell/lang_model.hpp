@@ -164,9 +164,6 @@ public:
               PerfectHash, Buckets, Tokenizer, CheckSum)
 private:
 
-    template <typename TWIt>
-    TWIt Advance2next(TWIt beg, TWIt const & e) const;
-
     double CalcGram1Prob(wdata_t const & winf) const
     {
         //return (winf.cnt + K) / (TotalWords + VocabSize); // JS_CNT_FIX
@@ -214,8 +211,8 @@ double TLangModel::Score(TWIt beg, TWIt const & e) const
 {
     double result = 0.0;
     static wdata_t const unkn_wi {TWordId::Unknown};
-    TWIt next1 = Advance2next(beg, e); //std::advance(next1, 1); 
-    TWIt next2 = Advance2next(next1, e);
+    TWIt next1 = Advance2Next(beg, e); //std::advance(next1, 1); 
+    TWIt next2 = Advance2Next(next1, e);
 
     do 
     {
@@ -228,7 +225,7 @@ double TLangModel::Score(TWIt beg, TWIt const & e) const
   
         beg = next1;
         next1 = next2;
-        next2 = Advance2next(next2, e);
+        next2 = Advance2Next(next2, e);
     }
     while (beg != e);
 
@@ -264,16 +261,6 @@ void TLangModel::InitWords(text_tokens_t const & orig_txt_tok, TWords & wrds) co
         ++wit;
     }
     wrds.resize(std::distance(wrds.begin(), wit));
-}
-
-
-
-template <typename TWIt>
-TWIt TLangModel::Advance2next(TWIt beg, TWIt const & e) const
-{
-    while(++beg < e && beg -> is_punct())
-    {}    
-    return beg;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

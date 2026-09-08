@@ -131,6 +131,14 @@ inline cand_kind_t NextLevel(cand_kind_t const ck)
     return cand_kind_t(ck + 1u);
 }
 
+template <typename TWIt>
+TWIt Advance2Next(TWIt beg, TWIt const & e)
+{
+    while(++beg < e && beg -> is_punct())
+    {}    
+    return beg;
+}
+
 struct cand_word_t: public word_t
 {
     float           score;  
