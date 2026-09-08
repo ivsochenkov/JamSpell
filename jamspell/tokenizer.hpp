@@ -129,7 +129,7 @@ private:
         return ch == L'.' || ch == 0x2026; // "..."
     }
 
-    static inline bool isHardSentBreak(wchar_t const ch)
+    static inline bool isHardSentEnd(wchar_t const ch)
     { return ch == L'!' || ch == L'?'; }
 
     bool isSentBreak(text_tokens_const_iterator_t const curr_tok_it
@@ -139,7 +139,7 @@ private:
         wchar_t const curr_wch{curr_tok_it -> front()};
         text_tokens_const_iterator_t next {curr_tok_it}; ++next;
 
-        return isHardSentBreak(curr_wch) 
+        return isHardSentEnd(curr_wch) 
             || (isSoftSentEnd(curr_wch)
                 &&  (    next == e 
                     || (isCapitalLetter(next -> front()) 
@@ -161,8 +161,14 @@ private:
     bool isCapitalLetter(wchar_t const wch)const 
     {return std::isupper(wch, Locale);}
 
-    struct join_4_train_pred_t;
-    struct join_pred_t;
+    inline bool good4join (text_tokens_const_iterator_t const & a
+        , text_tokens_const_iterator_t const & b
+        , text_tokens_const_iterator_t const & c
+    ) const;
+
+    inline bool good4join(text_tokens_const_iterator_t const& a
+        , text_tokens_const_iterator_t const & b
+    ) const;
 
     tokenizer_type Tokenize(wstr_view_t const & txt
         , sep_type const & sep = sep_type{}
@@ -189,27 +195,14 @@ public:
     ) const;
 
     
-    template <typename TJoinPred>
-    void FilterJoin2(TJoinPred && good4Join
-        , text_tokens_t & tokens
-    ) const;
-
-    template <typename TJoinPred>
-    void FilterJoin3(TJoinPred && good4Join
-        , text_tokens_t & tokens
-    ) const;
-
-    
-
     void Filter4Spell(text_tokens_t & tokens) const;
 
     void Filter4Train(text_tokens_t & tokens) const;
     
-
     static bool isSentEnd(token_info_t const & t)
     { 
         return (t.size() == 1 )
-            && (isSoftSentEnd(t.front()) || isHardSentBreak(t.front())
+            && (isSoftSentEnd(t.front()) || isHardSentEnd(t.front())
             );
     }
 
@@ -248,110 +241,6 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////////
-
-template <typename TJoinPred>
-void TTokenizer::FilterJoin3(TJoinPred && good4Join
-    , text_tokens_t & tokens
-) const
-{
-    if(tokens.empty())
-    {
-        return;
-    }
-
-    bool prev_tok_is_good = false;
-    text_tokens_t::iterator tgt_it = tokens.begin(), i = tgt_it, e = tokens.end();
-    do
-    {
-        if( isGoodWordToken(*i))
-        {
-            (tgt_it++) -> assign (*i);
-            prev_tok_is_good = true;
-        }
-        else if((!i -> empty()) && isSentBreak(i, e))
-        {
-            (tgt_it++) -> assign (*i);
-            prev_tok_is_good = false;
-        }
-        else if (prev_tok_is_good)
-        {
-            // try to join!
-            text_tokens_t::iterator nxt_it = i;
-            if(++nxt_it != e)
-            {
-                if(std::invoke(std::forward<TJoinPred>(good4Join), --tgt_it, i, nxt_it))
-                {
-                    tgt_it -> reset (tgt_it -> pos() 
-                        , nxt_it -> pos() + nxt_it -> size() - tgt_it -> pos()
-                        // , std::distance(tgt_it -> data(), nxt_it -> data() + nxt_it -> size())
-                    );
-                    //prev_tok_is_good = true; // remains true, so don't needed!
-                    i = nxt_it;
-                }
-                else
-                {
-                    prev_tok_is_good = false;  // i is not good
-                }
-                ++tgt_it;
-            }
-        }
-    }
-    while ( ++i != e);
-
-    tokens.resize(std::distance(tokens.begin(), tgt_it));
-}
-
-template <typename TJoinPred>
-void TTokenizer::FilterJoin2(TJoinPred && good4Join
-    , text_tokens_t & tokens
-) const
-{
-    if(tokens.empty())
-    {
-        return;
-    }
-
-    bool prev_tok_is_good = false;
-    text_tokens_t::iterator tgt_it = tokens.begin(), i = tgt_it, e = tokens.end();
-    do
-    {
-        if( isGoodWordToken(*i))
-        {
-            (tgt_it++) -> assign (*i);
-            prev_tok_is_good = true;
-        }
-        else if((!i -> empty()) && isSentBreak(i, e))
-        {
-            (tgt_it++) -> assign (*i);
-            prev_tok_is_good = false;
-        }
-        else if (prev_tok_is_good)
-        {
-            // try to join!
-            text_tokens_t::iterator nxt_it = i;
-            if(++nxt_it != e)
-            {
-                if(std::invoke(std::forward<TJoinPred>(good4Join), --tgt_it, i, nxt_it))
-                {
-                    tgt_it -> reset (tgt_it -> pos() 
-                        , nxt_it -> pos() + nxt_it -> size() - tgt_it -> pos()
-                        // , std::distance(tgt_it -> data(), nxt_it -> data() + nxt_it -> size())
-                    );
-                    //prev_tok_is_good = true; // remains true, so don't needed!
-                    i = nxt_it;
-                }
-                else
-                {
-                    prev_tok_is_good = false;  // i is not good
-                }
-                ++tgt_it;
-            }
-        }
-    }
-    while ( ++i != e);
-
-    tokens.resize(std::distance(tokens.begin(), tgt_it));
-}
 
 text_tokens_const_iterator_t GetNextSentEnd(text_tokens_const_iterator_t b
     , text_tokens_const_iterator_t const & e

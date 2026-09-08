@@ -144,6 +144,7 @@ public:
 
     std::size_t dict_size() const {return WordToId.size();}
     std::size_t avg_word_length(std::size_t max_probes = 10000u) const;
+    std::size_t total_word_occs() const {return TotalWords;}
 
     TWordId UpdateWordId(str_view_t const & word);
     TWordId GetWordId(str_view_t const & word) const;
@@ -162,6 +163,9 @@ public:
     HANDYPACK(WordToId, LastWordID, TotalWords, VocabSize,
               PerfectHash, Buckets, Tokenizer, CheckSum)
 private:
+
+    template <typename TWIt>
+    TWIt Advance2next(TWIt beg, TWIt const & e) const;
 
     double CalcGram1Prob(wdata_t const & winf) const
     {
@@ -210,9 +214,9 @@ double TLangModel::Score(TWIt beg, TWIt const & e) const
 {
     double result = 0.0;
     static wdata_t const unkn_wi {TWordId::Unknown};
-    TWIt next1 {beg}, next2 {beg};
-    std::advance(next1, 1);
-    std::advance(next2, 2);
+    TWIt next1 = Advance2next(beg, e); //std::advance(next1, 1); 
+    TWIt next2 = Advance2next(next1, e);
+
     do 
     {
         result += std::log2(CalcGram1Prob(*beg));
@@ -222,10 +226,11 @@ double TLangModel::Score(TWIt beg, TWIt const & e) const
         result += std::log2(CalcGram3Prob(*beg, rN1, rN2));
         result += std::log2(Calc1StepGram2Prob(*beg, rN2));
   
-        ++next1;
-        ++next2;
+        beg = next1;
+        next1 = next2;
+        next2 = Advance2next(next2, e);
     }
-    while (++beg != e);
+    while (beg != e);
 
     return result;
 }
@@ -237,18 +242,38 @@ void TLangModel::InitWords(text_tokens_t const & orig_txt_tok, TWords & wrds) co
     auto wit = wrds.begin();
     for (token_info_t const & orig_token : orig_txt_tok)
     {
-        if((!orig_token.empty()) && !TTokenizer::isSentEnd(orig_token))
-        {
-            str_t al_str = ToAlphabet(Tokenizer.GetAlphabet(), orig_token.str());
-            if(WellFormedInAlphabet(al_str))
-            {                
-                wit -> str = std::move(al_str);
+
+        //if((!orig_token.empty()) /*&& !TTokenizer::isSentEnd(orig_token)*/)
+        //{
+        if(orig_token.size() < MAX_WORD_LENGTH
+            && (  wit -> str = ToAlphabet(Tokenizer.GetAlphabet(), orig_token.str())
+                , WellFormedInAlphabet(wit -> str )
+            )
+        )
+        {   
+            if(orig_token.size() == 1 && Tokenizer.isPunct(orig_token.str().front()))
+            {
+                wit -> id = word_id_t::Any;
+            }                         
+            else 
+            {
                 wit -> reset (GetWordInfo(wit -> str));
             }
         }
+        //}
         ++wit;
     }
     wrds.resize(std::distance(wrds.begin(), wit));
+}
+
+
+
+template <typename TWIt>
+TWIt TLangModel::Advance2next(TWIt beg, TWIt const & e) const
+{
+    while(++beg < e && beg -> is_punct())
+    {}    
+    return beg;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

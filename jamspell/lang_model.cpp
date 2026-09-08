@@ -282,8 +282,11 @@ void TLangModel::TGramLoader::FillGramms(text_tokens_const_iterator_t b
             ; ++b 
         )
         {
-            ToAlphabet(LM.Tokenizer.GetAlphabet(), b -> str(), alStr);
-            if(!WellFormedInAlphabet(alStr))
+            if( b -> size() > MAX_WORD_LENGTH 
+                || (     ToAlphabet(LM.Tokenizer.GetAlphabet(), b -> str(), alStr)
+                    ,   !WellFormedInAlphabet(alStr)
+                   )
+            )
             {
                 c = 0;
                 continue;
@@ -527,7 +530,8 @@ double TLangModel::Score(std::wstring const & str ) const
     return Score(orig_txt_tokens);
 }
 
-bool TLangModel::Dump(const std::string& modelFileName) const {
+bool TLangModel::Dump(const std::string& modelFileName) const 
+{
     std::ofstream out(modelFileName, std::ios::binary);
     if (!out.is_open()) {
         return false;
@@ -539,7 +543,8 @@ bool TLangModel::Dump(const std::string& modelFileName) const {
     return true;
 }
 
-bool TLangModel::Load(const std::string& modelFileName) {
+bool TLangModel::Load(const std::string& modelFileName) 
+{
     std::ifstream in(modelFileName, std::ios::binary);
     if (!in.is_open()) {
         return false;

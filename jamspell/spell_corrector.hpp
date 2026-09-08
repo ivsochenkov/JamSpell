@@ -25,7 +25,7 @@ public:
     using result_type = impl_type;
 
     explicit TCandMgr (candidates_t & cands, std::size_t const maxCandCnt = 64u)
-    : m_impl{cands}, m_max_cnt{maxCandCnt}, m_cand_kind{ckFirstLvl}
+    : m_impl{cands}, m_max_sz{maxCandCnt}, m_best_cnt {0u}, m_cand_kind{ckFirstLvl}
     {
         m_impl.reserve(maxCandCnt + 2u);
     }
@@ -37,7 +37,12 @@ public:
 
     bool insert (wdata_t const & wd, str_view_t const & s)
     {
-        if((m_impl.size() >= m_max_cnt) )
+        if (m_best_cnt < wd.cnt )
+        {
+            m_best_cnt = wd.cnt;
+        }
+
+        if((m_impl.size() >= m_max_sz) )
         {
             cand_word_t & hback = m_impl.back();
             if(wd.cnt <= hback.cnt)
@@ -53,14 +58,18 @@ public:
         return true;
     }
 
-    bool empty() const {return m_impl.empty();}
+    bool empty() const noexcept {return m_impl.empty();}
+    cnt_t best_cnt() const noexcept {return m_best_cnt;}
+
 
 private:
 
     void reset_heap_impl ();
 
     impl_type        &  m_impl;
-    std::size_t const   m_max_cnt;
+    std::size_t const   m_max_sz;
+    cnt_t               m_best_cnt  = 0;
+
     cand_kind_t         m_cand_kind;
     
 
@@ -81,6 +90,7 @@ public:
                 ,   SecondLvlPenalty            = 3.0       
                 ,   SwitchedWordPenalty         = 3.0
                 ,   SwitchedWordIsKnownPenalty  = 5.0
+                ,   InFreqWordThreshold         = 10e-7;
             ;
 
         ::std::size_t     MaxCandidatesToCheck = 64;
@@ -112,7 +122,19 @@ public:
 
 private:
 
-    TAlphabet const & GetAlphabet() const
+    bool IsInfreq(cand_word_t const & ow) const noexcept
+    {
+        return (double(ow.cnt) / LangModel.total_word_occs() )
+            < m_opt.InFreqWordThreshold;
+    }
+
+    bool CandidatesAreInfreq(TCandMgr const & cmgr) const noexcept 
+    {
+        return (double(cmgr.best_cnt()) / LangModel.total_word_occs() )
+            < m_opt.InFreqWordThreshold;
+    }
+
+    TAlphabet const & GetAlphabet() const noexcept
     { return GetLangModel().GetTokenizer().GetAlphabet(); }
 
     void AppendWithCase(std::wstring & result
@@ -123,6 +145,12 @@ private:
     str_t PuntoSwitcher(str_view_t const &w) const;
 
     void FormEditsCandidates(bool const orig_is_known
+        , cand_kind_t const ck
+        , str_view_t const & s
+        , TCandMgr & result
+    ) const;
+
+    void FormEditsCandidatesExt(bool const orig_is_known
         , cand_kind_t const ck
         , str_view_t const & s
         , TCandMgr & result

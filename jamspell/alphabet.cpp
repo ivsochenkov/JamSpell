@@ -184,9 +184,6 @@ void TAlphabet::LoadSubst (subs_type & sbst, std::wstring_view const & lttrs)
 
 bool WellFormedInAlphabet(std::string_view const & src)
 {
-    if (src.size() >= MAX_WORD_LENGTH)
-        return false;
-        
     for(char c : src)
     {
         if(!c)

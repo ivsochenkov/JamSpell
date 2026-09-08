@@ -26,46 +26,122 @@ std::string Tokens2Str (text_tokens_t const & tokens)
 }
 #endif
 
-struct TTokenizer::join_4_train_pred_t
+inline bool TTokenizer::good4join (text_tokens_const_iterator_t const & a
+    , text_tokens_const_iterator_t const & b
+    , text_tokens_const_iterator_t const & c
+) const
 {
-    explicit join_4_train_pred_t (TTokenizer const & tknzr): m_tknzr(tknzr) {}
+    return isGoodWordToken(*c) 
+        && isNotSpaceDelimited(a, b) 
+        && isNotSpaceDelimited(b, c)
+        && (b -> size() == 1) && isA(b -> front(), L"-\'");
+}
 
-    template <typename TTokIt>
-    bool operator () (TTokIt const & a, TTokIt const & b, TTokIt const & c) const
-    {
-        return m_tknzr.isGoodWordToken(*c) 
-            && m_tknzr.isNotSpaceDelimited(a, b) 
-            && m_tknzr.isNotSpaceDelimited(b, c)
-            && (b -> size() == 1) && m_tknzr.isA(b -> front(), L"-\'");
-    }
-    private:
-        TTokenizer const &  m_tknzr;
-};
-
-struct TTokenizer::join_pred_t
+inline bool TTokenizer::good4join(text_tokens_const_iterator_t const& a
+    , text_tokens_const_iterator_t const & b
+) const
 {
-    explicit join_pred_t (TTokenizer const & tknzr): m_tknzr(tknzr) {}
-
-    template <typename TTokIt>
-    bool operator () (TTokIt const& a, TTokIt const & b, TTokIt const & c) const
-    {
-        return m_tknzr.isGoodWordToken(*c) 
-            && m_tknzr.isNotSpaceDelimited(a, b) 
-            && m_tknzr.isNotSpaceDelimited(b, c)
-            && (b -> size() == 1) && m_tknzr.isPunct(b -> front()); 
-    }
-    private:
-        TTokenizer const &  m_tknzr;
-};
+    return isNotSpaceDelimited(a, b) 
+        && !((a -> size() == 1) && isA(a -> front(), L"([{")) 
+        && !((b -> size() == 1) && isA(b -> front(), L".,;:!?)")); 
+    ; 
+}
 
 void TTokenizer::Filter4Spell(text_tokens_t & tokens) const
 {
-    FilterJoin2(join_pred_t{*this}, tokens);
+    if(tokens.empty())
+    {
+        return;
+    }
+
+#if 0
+    text_tokens_t::iterator tgt_it = tokens.begin();
+    for (text_tokens_t::iterator nxt_it = tgt_it, e = tokens.end()
+        ; ++nxt_it != e
+        ;
+    )
+    {
+        if(good4join (tgt_it, nxt_it))
+        {
+            tgt_it -> reset (tgt_it -> pos() 
+                , nxt_it -> pos() + nxt_it -> size() - tgt_it -> pos()
+            );
+        }
+        else
+        {
+            (++tgt_it) -> assign (*nxt_it);
+        }
+    }
+
+    text_tokens_t::iterator const e = ++tgt_it; // N!B!
+    for (text_tokens_t::iterator i = tgt_it = tokens.begin()
+        ; i != e
+        ; ++i
+    )
+    {
+        std::size_t const tsz = i -> size();
+        if( tsz < max_word_length && 
+            (tsz > 1u  || (tsz > 0u && isSentBreak(i, e))) 
+        )
+        {
+            (tgt_it++) -> assign (*i);
+        }
+    }
+
+    tokens.resize(std::distance(tokens.begin(), tgt_it));
+#else   // #if 0
+
+#endif  // #if 0
+
 }
 
 void TTokenizer::Filter4Train(text_tokens_t & tokens) const
 {
-    FilterJoin3(join_4_train_pred_t{*this}, tokens);
+    if(tokens.empty())
+    {
+        return;
+    }
+
+    bool prev_tok_is_good = false;
+    text_tokens_t::iterator tgt_it = tokens.begin(), i = tgt_it, e = tokens.end();
+    do
+    {
+        if( isGoodWordToken(*i))
+        {
+            (tgt_it++) -> assign (*i);
+            prev_tok_is_good = true;
+        }
+        else if((!i -> empty()) && isSentBreak(i, e))
+        {
+            (tgt_it++) -> assign (*i);
+            prev_tok_is_good = false;
+        }
+        else if (prev_tok_is_good)
+        {
+            // try to join!
+            text_tokens_t::iterator nxt_it = i;
+            if(++nxt_it != e)
+            {
+                if(good4join(--tgt_it, i, nxt_it))
+                {
+                    tgt_it -> reset (tgt_it -> pos() 
+                        , nxt_it -> pos() + nxt_it -> size() - tgt_it -> pos()
+                        // , std::distance(tgt_it -> data(), nxt_it -> data() + nxt_it -> size())
+                    );
+                    //prev_tok_is_good = true; // remains true, so don't needed!
+                    i = nxt_it;
+                }
+                else
+                {
+                    prev_tok_is_good = false;  // i is not good
+                }
+                ++tgt_it;
+            }
+        }
+    }
+    while ( ++i != e);
+
+    tokens.resize(std::distance(tokens.begin(), tgt_it));
 }
 
 TTokenizer::tokenizer_type 

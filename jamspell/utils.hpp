@@ -63,7 +63,11 @@ struct wdata_t
 
     bool unknown() const noexcept { return id == word_id_t::Unknown;}
 
-    explicit operator bool () const noexcept {return !unknown();}
+    //explicit operator bool () const noexcept {return !unknown();}
+
+    bool is_punct() const noexcept { return id == word_id_t::Any;}
+
+    bool is_word() const noexcept { return !is_punct();}
 
     HANDYPACK(id, cnt)
 };

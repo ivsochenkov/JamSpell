@@ -126,21 +126,44 @@ candidates_t TSpellCorrector::GetCandidates(candidates_range_t const & context
 {
     BOOST_ASSERT_MSG (position < context.size(), "position is out of range!");
 
+    candidates_t candidates;
     cand_word_t & orig_word = context[position];
+
+    if(orig_word.is_punct())
+    {
+        return candidates;
+    }
+
     orig_word.score = ScoreOrig(context, position);
     JS_TRACE_MSG(std::cerr << "[debug] Scored orig: \'" 
         << w_to_u8(FromAlphabet(GetAlphabet(), orig_word.str)) 
         << "\' id = " << static_cast<std::uint32_t> (orig_word.id) 
         << " count = " << orig_word.cnt << " score = " << orig_word.score << "\n"
     );
-
-    candidates_t candidates;
+    
     TCandMgr cndMgr(candidates, m_opt.MaxCandidatesToCheck);
-   
+
+#if 0
+    cndMgr.set_kind (ckFirstLvl);
+    Edits2(orig_word.str, cndMgr);
+
+
+    if ((orig_word.unknown() || OrigIsInfreq(orig_word) ) 
+        && (cndMgr.empty() || CandidatesAreInfreq(cndMgr))
+    )
+    {
+        TrySwitchedCandidates(context, position, cndMgr);
+        
+
+        result.set_kind (NextLevel(ck));
+        Edits(s, result);        
+    }
+#else // #if 0
+    //////////////
     FormEditsCandidates(!orig_word.unknown(), ckFirstLvl, orig_word.str, cndMgr);
     
     bool sw_orig_is_known = false;
-    if(orig_word.unknown())
+    if(orig_word.unknown() || IsInfreq(orig_word) )
     {
         str_t sw_word_str = PuntoSwitcher(orig_word.str);
         if(!sw_word_str.empty())
@@ -155,6 +178,8 @@ candidates_t TSpellCorrector::GetCandidates(candidates_range_t const & context
             FormEditsCandidates(sw_orig_is_known, ckFirstLvlSw, sw_cand.str, cndMgr);
         }        
     }
+#endif // #if 0
+    ///////////
   
     Score(context, position, candidates, sw_orig_is_known);
     std::sort(candidates.begin(), candidates.end()
@@ -186,7 +211,6 @@ candidates_t TSpellCorrector::InitContext(text_tokens_t const & orig_txt_tok) co
     }
     return ctx;
 }
-
 
 
 
@@ -286,7 +310,7 @@ std::wstring TSpellCorrector::FixFragment(std::wstring const & text) const
             ; ++j, ++al_word_it
         ) 
         {
-            if (al_word_it -> str.empty())
+            if (al_word_it -> str.empty() || al_word_it -> is_punct())
             {
                 continue;
             }
@@ -299,10 +323,6 @@ std::wstring TSpellCorrector::FixFragment(std::wstring const & text) const
                 cand_word_t & top_w = candidates.front();
                 if(curr_word.score < top_w.score && top_w.id != curr_word.id)
                 {
-                    //curr_word.str = top_w.str;
-                    //curr_word.id = top_w.id;
-                    //curr_word.score = top_w.score;
-                    //curr_word.weight = LangModel.GetWordInfo(curr_word.str).weight;
                     curr_word = std::move(top_w);
                     kept_orig = false;
                 }
@@ -362,6 +382,25 @@ void TSpellCorrector::FormEditsCandidates(bool const orig_is_known
     {
         result.set_kind (NextLevel(ck));
         Edits(s, result);
+    }
+}
+
+void TSpellCorrector::FormEditsCandidatesExt(bool const orig_is_known
+    , cand_kind_t const ck
+    , str_view_t const & s
+    , TCandMgr & result
+) const
+{
+    result.set_kind (ck);
+    std::size_t const cnt_addd {Edits2(s, result)};
+    if ((!orig_is_known) && (!cnt_addd))
+    {
+        //!!!!
+        if(!cnt_addd)
+        {
+            result.set_kind (NextLevel(ck));
+            Edits(s, result);
+        }
     }
 }
 
