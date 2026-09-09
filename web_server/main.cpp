@@ -58,7 +58,7 @@ std::string GetCandidates(const NJamSpell::TSpellCorrector& corrector
             nlohmann::json currentResult;
             
             token_info_t const & orig_token = orig_sent[j];
-            currentResult["pos_from"] = orig_token.pos();
+            currentResult["pos_from"] = orig_token.ofs();
             currentResult["len"] = orig_token.size();
             currentResult["candidates"] = nlohmann::json::array();
 

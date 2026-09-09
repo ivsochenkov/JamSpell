@@ -15,17 +15,22 @@
 namespace NJamSpell 
 {
 
-std::string LoadFile(const std::string& fileName) {
-    std::ifstream in(fileName, std::ios::binary);
-    std::ostringstream out;
-    out << in.rdbuf();
-    return out.str();
-}
+#if defined(DEBUG) || defined(JS_TRACE)
+std::string Tokens2Str (text_tokens_t const & tokens)
+{
+    std::string s;
+    s.reserve(64u + 10*tokens.size());
 
-void SaveFile(const std::string& fileName, const std::string& data) {
-    std::ofstream out(fileName, std::ios::binary);
-    out << data;
+    for(auto const & t : tokens )
+    {
+        s += "{str:\"";
+        s += w_to_u8(t.str());
+        s += "\"}";
+    }
+    
+    return s;
 }
+#endif
 
 uint64_t GetCurrentTimeMs() {
     using namespace std::chrono;

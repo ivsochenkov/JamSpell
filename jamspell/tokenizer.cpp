@@ -9,23 +9,6 @@
 namespace NJamSpell 
 {
 
-#if defined(DEBUG) || defined(JS_TRACE)
-std::string Tokens2Str (text_tokens_t const & tokens)
-{
-    std::string s;
-    s.reserve(64u + 10*tokens.size());
-
-    for(auto const & t : tokens )
-    {
-        s += "{str:\"";
-        s += w_to_u8(t.str());
-        s += "\"}";
-    }
-    
-    return s;
-}
-#endif
-
 inline bool TTokenizer::good4join (text_tokens_const_iterator_t const & a
     , text_tokens_const_iterator_t const & b
     , text_tokens_const_iterator_t const & c
@@ -124,8 +107,8 @@ void TTokenizer::Filter4Train(text_tokens_t & tokens) const
             {
                 if(good4join(--tgt_it, i, nxt_it))
                 {
-                    tgt_it -> reset (tgt_it -> pos() 
-                        , nxt_it -> pos() + nxt_it -> size() - tgt_it -> pos()
+                    tgt_it -> reset (tgt_it -> ofs() 
+                        , nxt_it -> ofs() + nxt_it -> size() - tgt_it -> ofs()
                         // , std::distance(tgt_it -> data(), nxt_it -> data() + nxt_it -> size())
                     );
                     //prev_tok_is_good = true; // remains true, so don't needed!

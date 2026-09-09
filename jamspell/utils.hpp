@@ -52,6 +52,74 @@ using str_view_t = std::string_view;
 //using str_t = std::string;
 using str_t = boost::container::string;
 
+/// @brief /////////////////////////////////////////////////////////////////////
+
+struct token_info_t
+{
+    using ofs_type = ::std::uint32_t;
+    using len_type = ::std::uint32_t;
+
+    explicit token_info_t(wstr_view_t const & txt, ofs_type const ofs = -1, len_type const l = 0u)
+    : m_pTxt(&txt), m_ofs{ofs}, m_len{l}
+    {}
+
+    token_info_t () {};
+
+    void reset (ofs_type const ofs, len_type const l) 
+    {
+        m_ofs = ofs;
+        m_len = l;
+    }
+
+    void assign(token_info_t const & rhs)
+    {
+        reset(rhs.m_ofs, rhs.m_len);
+    }
+
+    wstr_view_t str() const
+    {
+        return wstr_view_t {m_pTxt -> data() + m_ofs, m_len};
+    }
+
+    constexpr wstr_view_t::const_pointer data() const 
+    {
+        BOOST_ASSERT_MSG(m_pTxt, "Text must not be a nullptr!");
+        return m_pTxt -> data() + m_ofs;
+    }
+
+    constexpr bool empty () const {return !m_len;}
+
+    constexpr wstr_view_t::value_type front () const 
+    {
+        BOOST_ASSERT_MSG(m_pTxt, "Text must not be a nullptr!");
+        return (*m_pTxt)[m_ofs];
+    }
+
+    constexpr ofs_type ofs () const {return m_ofs;}
+    constexpr ofs_type end_ofs () const {return m_ofs + m_len;}
+    constexpr len_type size () const {return m_len;}
+    
+private:
+
+    wstr_view_t const *         m_pTxt   = nullptr;
+    ofs_type                    m_ofs    = -1;
+    len_type                    m_len    = 0u;
+};
+
+//using text_tokens_t    = std::vector<wstr_view_t>;
+using text_tokens_t    = std::vector<token_info_t>;
+using text_tokens_iterator_t = text_tokens_t::iterator;
+using text_tokens_const_iterator_t = text_tokens_t::const_iterator;
+
+using text_tokens_const_iterator_range_t 
+    = boost::iterator_range<text_tokens_const_iterator_t>;
+
+#if defined(DEBUG) || defined(JS_TRACE)
+std::string Tokens2Str (text_tokens_t const & tokens);
+#endif
+
+////////////////////////////////////////////////////////////////////////////////
+
 struct wdata_t
 {
     TWordId     id;
@@ -165,8 +233,7 @@ using candidates_t = std::vector<cand_word_t>;
 using candidates_range_t = boost::iterator_range<candidates_t::iterator>;
 using candidates_crange_t = boost::iterator_range<candidates_t::const_iterator>;
 
-std::string LoadFile(const std::string& fileName);
-void SaveFile(const std::string& fileName, const std::string& data);
+////////////////////////////////////////////////////////////////////////////////
 
 uint64_t GetCurrentTimeMs();
 

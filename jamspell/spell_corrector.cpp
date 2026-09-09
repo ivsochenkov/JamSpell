@@ -334,7 +334,7 @@ std::wstring TSpellCorrector::FixFragment(std::wstring const & text) const
             }
 
             token_info_t const & orig_token = orig_sent[j];
-            size_t const currOrigPos = orig_token.pos();
+            size_t const currOrigPos = orig_token.ofs();
             result += orig_txt.substr(origPos, currOrigPos - origPos);
             origPos = currOrigPos;
             

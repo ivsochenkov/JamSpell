@@ -206,7 +206,9 @@ int main(int argc, const char** argv) {
 ```
 
 ### Other languages
-You can generate extensions for other languages using [swig tutorial](http://www.swig.org/tutorial.html). The swig interface file is `jamspell.i`. Pull requests with build scripts are welcome.
+You can generate extensions for other languages using [swig tutorial](http://www.swig.org/tutorial.html). 
+The swig interface file is `jamspell.i`. 
+Pull requests with build scripts are welcome.
 
 ## HTTP API
 * Install ```cmake```
