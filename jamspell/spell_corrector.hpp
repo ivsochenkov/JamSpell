@@ -110,7 +110,7 @@ public:
 
 //    bool WordIsKnown( str_view_t const & word) const; 
 
-    candidates_t GetCandidates(candidates_range_t const & context
+    candidates_t GetCandidates(context_range_t const & context
         , size_t const position
     ) const;
 
@@ -118,7 +118,9 @@ public:
     
     NJamSpell::TLangModel const & GetLangModel() const {return LangModel;}
 
-    candidates_t InitContext(text_tokens_t const & orig_txt_tok) const;
+    static context_range_t GetNextSent(context_t::iterator const & b
+        , context_t::iterator const & e
+    );
 
 private:
 
@@ -193,15 +195,15 @@ private:
         , TCandMgr & candidates
     ) const;
 
-    candidates_crange_t GetSentenceRange( candidates_range_t const & sentence
+    context_crange_t GetSentenceRange( context_crange_t const & sentence
         , std::size_t const pos
     ) const;
 
-    float ScoreOrig(candidates_range_t const & orig_sent
+    double ScoreOrig(context_range_t const & orig_sent
         , std::size_t const pos
     ) const;
 
-    void Score(candidates_range_t const & context
+    void Score(context_range_t const & context
         , std::size_t const pos
         , candidates_t & candidates
         , bool const sw_orig_is_known
@@ -212,8 +214,6 @@ private:
         , bool const orig_is_known
         , bool const sw_orig_is_known 
     ) const;
-
-private:
 
     TLangModel                      LangModel;
     std::unique_ptr<TBloomFilter>   Deletes1;

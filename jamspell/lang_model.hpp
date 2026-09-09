@@ -152,6 +152,12 @@ public:
     template <typename TWords>
     void InitWords(text_tokens_t const & orig_txt_tok, TWords & wrds) const;
 
+    template <typename TCntxt>
+    void InitContext(TCntxt & cntxt) const;
+
+    void Text2Words(wstr_view_t const & txt, words_t & wrds) const;
+    void Text2Words(wstr_view_t const & txt, context_t & cntxt) const;
+
     uint64_t GetCheckSum() const {return CheckSum;}
 
     using dict_const_iterator = TWord2IdMap::const_iterator;
@@ -163,6 +169,8 @@ public:
     HANDYPACK(WordToId, LastWordID, TotalWords, VocabSize,
               PerfectHash, Buckets, Tokenizer, CheckSum)
 private:
+
+    bool InitWordFromToken(token_info_t const & tinf, word_t & w) const;
 
     double CalcGram1Prob(wdata_t const & winf) const
     {
@@ -239,28 +247,20 @@ void TLangModel::InitWords(text_tokens_t const & orig_txt_tok, TWords & wrds) co
     auto wit = wrds.begin();
     for (token_info_t const & orig_token : orig_txt_tok)
     {
-
-        //if((!orig_token.empty()) /*&& !TTokenizer::isSentEnd(orig_token)*/)
-        //{
-        if(orig_token.size() < MAX_WORD_LENGTH
-            && (  wit -> str = ToAlphabet(Tokenizer.GetAlphabet(), orig_token.str())
-                , WellFormedInAlphabet(wit -> str )
-            )
-        )
-        {   
-            if(orig_token.size() == 1 && Tokenizer.isPunct(orig_token.str().front()))
-            {
-                wit -> id = word_id_t::Any;
-            }                         
-            else 
-            {
-                wit -> reset (GetWordInfo(wit -> str));
-            }
-        }
-        //}
-        ++wit;
+        wit += InitWordFromToken(orig_token, *wit);
     }
     wrds.resize(std::distance(wrds.begin(), wit));
+}
+
+template <typename TCntxt>
+void TLangModel::InitContext(TCntxt & cntxt) const
+{   
+    auto wit = cntxt.begin();
+    for (cntxt_word_t & cw : cntxt)
+    {
+        wit -> kind = ckOrig;
+        InitWordFromToken(cw.token, *wit++);
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////

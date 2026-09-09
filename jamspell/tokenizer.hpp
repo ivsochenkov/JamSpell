@@ -130,6 +130,11 @@ public:
         , sep_type const & sep = sep_type{}
     ) const;
 
+    template <typename TTokens>
+    void Parse(wstr_view_t const & txt
+        , TTokens & rtoks
+        , sep_type const & sep = sep_type{}
+    ) const;
     
     void Filter4Spell(text_tokens_t & tokens) const;
 
@@ -178,6 +183,20 @@ private:
 
 ////////////////////////////////////////////////////////////////////////////////
 
+template <typename TTokens>
+void TTokenizer::Parse(wstr_view_t const & txt
+    , TTokens & rtoks
+    , sep_type const & sep
+) const
+{    
+    tokenizer_type const & tokens(Tokenize(txt, sep)); 
+    for (token_type const & token: tokens)
+    {
+        rtoks.emplace_back(token.make_info(txt));
+    }
+}
+
+/*
 text_tokens_const_iterator_t GetNextSentEnd(text_tokens_const_iterator_t b
     , text_tokens_const_iterator_t const & e
 );
@@ -201,6 +220,6 @@ MapSentence (candidates_t & contxt
     std::advance(wend, std::distance(orig_txt_tokens.begin(), curr_sent.end()));
     return candidates_range_t{wbeg, wend};
 }
-
+*/
 
 } // NJamSpell

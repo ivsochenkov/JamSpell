@@ -172,6 +172,8 @@ struct word_t: public wdata_t
 
     wdata_t const & wdata() const {return *this;}
 
+    bool good() const {return is_word() && !str.empty();}
+
 };
 
 using words_t = std::vector<word_t>;    // orig_word_t
@@ -207,12 +209,14 @@ TWIt Advance2Next(TWIt beg, TWIt const & e)
     return beg;
 }
 
+////////////////////////////////////////////////////////////////////////////////
+
 struct cand_word_t: public word_t
 {
     float           score;  
     cand_kind_t     kind    = ckNone;
 
-    cand_word_t (): word_t{} {}
+    cand_word_t () = default;
     
     cand_word_t (word_id_t const i
         , str_view_t const & s
@@ -234,6 +238,35 @@ using candidates_range_t = boost::iterator_range<candidates_t::iterator>;
 using candidates_crange_t = boost::iterator_range<candidates_t::const_iterator>;
 
 ////////////////////////////////////////////////////////////////////////////////
+
+struct cntxt_word_t: public cand_word_t
+{
+    cntxt_word_t() = default;
+
+    explicit cntxt_word_t(token_info_t const & tinf)
+    : cand_word_t{}, token{tinf} 
+    {}
+
+    void assign_from (cand_word_t && cnd)
+    {
+        static_cast<cand_word_t &>(*this) = std::move(cnd);
+    }
+
+    token_info_t        token;
+};
+
+using context_t = std::vector<cntxt_word_t>;
+using context_range_t = boost::iterator_range<context_t::iterator>;
+using context_crange_t = boost::iterator_range<context_t::const_iterator>;
+
+////////////////////////////////////////////////////////////////////////////////
+
+template <typename TWrds>
+void ReserveWords(TWrds & wrds, wstr_view_t const & txt)
+{
+    static constexpr ::std::size_t avg_word_len = 3;
+    wrds.reserve(8u + txt.size() / avg_word_len);
+}
 
 uint64_t GetCurrentTimeMs();
 

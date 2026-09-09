@@ -630,11 +630,47 @@ str_t TLangModel::GetWord(str_view_t const & word) const
 }
 */
 
+void TLangModel::Text2Words(wstr_view_t const & txt, words_t & wrds) const
+{
+    text_tokens_t txt_toks = GetTokenizer().Parse(txt);
+    InitWords(txt_toks, wrds);
+}
+ 
+
+void TLangModel::Text2Words(wstr_view_t const & txt, context_t & cntxt) const
+{
+    ReserveWords(cntxt, txt);
+    GetTokenizer().Parse(txt, cntxt);
+    InitContext(cntxt);
+}
+
 wdata_t TLangModel::GetWordInfo(str_view_t const & word) const 
 {
     auto it = WordToId.find(word);
     return (it != WordToId.end()) ? it.value() : wdata_t {};
 }
+
+bool TLangModel::InitWordFromToken(token_info_t const & tinf, word_t & w) const
+{
+    if(tinf.size() < MAX_WORD_LENGTH
+        && (  w.str = ToAlphabet(Tokenizer.GetAlphabet(), tinf.str())
+                , WellFormedInAlphabet(w.str )
+           )
+    )
+    {   
+        if(tinf.size() == 1 && Tokenizer.isPunct(tinf.str().front()))
+        {
+            w.id = word_id_t::Any;
+        }                         
+        else 
+        {
+            w.reset (GetWordInfo(w.str));
+        }
+        return true;
+    }
+    return false;
+}
+
 
 double TLangModel::CalcGram2Prob(wdata_t const & winf1
     , wdata_t const & winf2

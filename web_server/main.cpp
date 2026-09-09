@@ -13,33 +13,29 @@ std::string GetCandidates(const NJamSpell::TSpellCorrector& corrector
     corrector.GetLangModel().GetTokenizer().FilterHyphen(input);
     
     wstr_view_t const orig_txt(input);
-    
-    text_tokens_t orig_txt_tokens = corrector.GetLangModel().GetTokenizer().Parse(orig_txt);
-    corrector.GetLangModel().GetTokenizer().Filter4Spell(orig_txt_tokens);
-    candidates_t txt_words = corrector.InitContext(orig_txt_tokens);
-    assert(txt_words.size() == orig_txt_tokens.size());
+
+    context_t cntxt;
+    corrector.GetLangModel().Text2Words(orig_txt, cntxt);
 
     nlohmann::json results;
     results["results"] = nlohmann::json::array();
 
     size_t origPos = 0;
-    for (auto orig_it = orig_txt_tokens.cbegin(), e = orig_txt_tokens.cend()
+    for (auto orig_it = cntxt.begin(), e = cntxt.end()
         ; orig_it < e 
         ; ++orig_it // see the last line marked with !!!. We omit sent end token
                     // and proceed to next sentence begin
     )
     {
-        auto orig_sent = GetNextSent(orig_it, e);
+        context_range_t curr_sent_ctxt = TSpellCorrector::GetNextSent(orig_it, e);
 
-        candidates_range_t curr_sent_ctxt(MapSentence(txt_words, orig_txt_tokens, orig_sent));
         std::size_t j = 0;
-
         for ( auto al_word_it = curr_sent_ctxt.begin()
             ; al_word_it != curr_sent_ctxt.end()
             ; ++j, ++al_word_it
         ) 
         {
-            if (al_word_it -> str.empty())
+            if (!al_word_it -> good())
             {
                 continue;
             }
@@ -57,7 +53,7 @@ std::string GetCandidates(const NJamSpell::TSpellCorrector& corrector
            
             nlohmann::json currentResult;
             
-            token_info_t const & orig_token = orig_sent[j];
+            token_info_t const & orig_token = al_word_it -> token;
             currentResult["pos_from"] = orig_token.ofs();
             currentResult["len"] = orig_token.size();
             currentResult["candidates"] = nlohmann::json::array();
@@ -74,7 +70,7 @@ std::string GetCandidates(const NJamSpell::TSpellCorrector& corrector
 
             results["results"].push_back(currentResult);
         }
-        orig_it = orig_sent.end();  // !!!
+        orig_it = curr_sent_ctxt.end();  // !!!
 
     }
 

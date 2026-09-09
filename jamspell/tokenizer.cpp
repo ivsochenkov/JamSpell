@@ -149,12 +149,8 @@ text_tokens_t TTokenizer::Parse(wstr_view_t const & txt
 {
     tokenizer_type const & tokens(Tokenize(txt, sep));
     text_tokens_t ret;
-    ret.reserve(1u + txt.size() / avg_word_len);
-    //ret.assign(tok.begin(), tok.end());
-    for (token_type const & token: tokens)
-    {
-        ret.emplace_back(token.make_info(txt));
-    }
+    ReserveWords(ret, txt);
+    Parse(txt, ret, sep);
     return ret;
 }
 
@@ -198,7 +194,7 @@ void TTokenizer::FilterHyphen(std::wstring & txt)
     txt.resize(std::distance(txt.begin(), tgt));
 }
 
-
+/*
 text_tokens_const_iterator_t GetNextSentEnd(text_tokens_const_iterator_t b
     , text_tokens_const_iterator_t const & e
 )
@@ -207,5 +203,6 @@ text_tokens_const_iterator_t GetNextSentEnd(text_tokens_const_iterator_t b
     {}
     return b;
 }
+*/
 
 } // NJamSpell
