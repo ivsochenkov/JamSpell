@@ -87,12 +87,12 @@ private:
     bool iSpaceDelimited(text_tokens_const_iterator_t const curr_tok_it
         , text_tokens_const_iterator_t const next
     ) const 
-    { return curr_tok_it -> end_ofs() < next -> ofs();}  
+    { return areSpaced(*curr_tok_it, *next);}  
 
     bool isNotSpaceDelimited(text_tokens_const_iterator_t const curr_tok_it
         , text_tokens_const_iterator_t const  next
     ) const 
-    { return curr_tok_it -> end_ofs() == next -> ofs();}  
+    { return areNotSpaced(*curr_tok_it, *next);}  
 
     bool isCapitalLetter(wchar_t const wch)const 
     {return std::isupper(wch, Locale);}

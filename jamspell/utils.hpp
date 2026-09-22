@@ -60,7 +60,7 @@ struct token_info_t
     using len_type = ::std::uint32_t;
 
     explicit token_info_t(wstr_view_t const & txt, ofs_type const ofs = -1, len_type const l = 0u)
-    : m_pTxt(&txt), m_ofs{ofs}, m_len{l}
+    : m_pTxt(txt.data()), m_ofs{ofs}, m_len{l}
     {}
 
     token_info_t () {};
@@ -78,13 +78,12 @@ struct token_info_t
 
     wstr_view_t str() const
     {
-        return wstr_view_t {m_pTxt -> data() + m_ofs, m_len};
+        return wstr_view_t {data(), m_len};
     }
 
     constexpr wstr_view_t::const_pointer data() const 
     {
-        BOOST_ASSERT_MSG(m_pTxt, "Text must not be a nullptr!");
-        return m_pTxt -> data() + m_ofs;
+        return m_pTxt + m_ofs;
     }
 
     constexpr bool empty () const {return !m_len;}
@@ -92,7 +91,7 @@ struct token_info_t
     constexpr wstr_view_t::value_type front () const 
     {
         BOOST_ASSERT_MSG(m_pTxt, "Text must not be a nullptr!");
-        return (*m_pTxt)[m_ofs];
+        return m_pTxt[m_ofs];
     }
 
     constexpr ofs_type ofs () const {return m_ofs;}
@@ -101,9 +100,9 @@ struct token_info_t
     
 private:
 
-    wstr_view_t const *         m_pTxt   = nullptr;
-    ofs_type                    m_ofs    = -1;
-    len_type                    m_len    = 0u;
+    wstr_view_t::value_type const       * m_pTxt   = nullptr;
+    ofs_type                            m_ofs    = -1;
+    len_type                            m_len    = 0u;
 };
 
 //using text_tokens_t    = std::vector<wstr_view_t>;
@@ -117,6 +116,12 @@ using text_tokens_const_iterator_range_t
 #if defined(DEBUG) || defined(JS_TRACE)
 std::string Tokens2Str (text_tokens_t const & tokens);
 #endif
+
+inline bool areSpaced(token_info_t const & lhs, token_info_t const & rhs)
+{ return lhs.end_ofs() < rhs.ofs();}
+
+inline bool areNotSpaced(token_info_t const & lhs, token_info_t const & rhs)
+{ return lhs.end_ofs() == rhs.ofs();}
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -146,19 +151,18 @@ struct word_t: public wdata_t
 
     str_type                str;                    
 
-    word_t (TWordId const i
-        , str_view_t const & s
-        , cnt_t const c = 0
-    )
-    : wdata_t{i, c}, str{s}
+    template <typename TStr>
+    word_t (TWordId const i, TStr && s, cnt_t const c = 0 )
+    : wdata_t{i, c}, str{std::forward<TStr>(s)}
     {}
 
     explicit word_t (word_id_t const i = word_id_t::Unknown, cnt_t const c = 0.0)
     :  wdata_t{i, c}, str{}
     {}
 
-    word_t (wdata_t const & wd, str_t && s)
-    : wdata_t{wd}, str{std::move(s)}
+    template <typename TStr>
+    word_t (wdata_t const & wd, TStr && s)
+    : wdata_t{wd}, str{std::forward<TStr>(s)}
     {}
 
     //explicit word_t (str_type const & s )
@@ -204,7 +208,7 @@ inline cand_kind_t NextLevel(cand_kind_t const ck)
 template <typename TWIt>
 TWIt Advance2Next(TWIt beg, TWIt const & e)
 {
-    while(++beg < e && beg -> is_punct())
+    while(++beg < e && !(beg -> is_word()))
     {}    
     return beg;
 }
@@ -218,18 +222,22 @@ struct cand_word_t: public word_t
 
     cand_word_t () = default;
     
-    cand_word_t (word_id_t const i
-        , str_view_t const & s
-        , cnt_t const c
-        , cand_kind_t const ck
-    )
-    : word_t{i, s, c}, kind{ck} {}
+    template <typename TStr>
+    cand_word_t (word_id_t const i, TStr && s, cnt_t const c, cand_kind_t const ck)
+    : word_t{i, std::forward<TStr>(s), c}, kind{ck} 
+    {}
 
+    /*
     cand_word_t (wdata_t const & wd
         , str_t && s
         , cand_kind_t const k
     ): word_t{wd, std::move(s)}, kind{k} 
     {}
+
+    */
+
+    bool is_orig() const noexcept { return ckOrig == kind;}
+    bool is_none() const noexcept { return ckNone == kind;}
 
 };
 
@@ -247,7 +255,7 @@ struct cntxt_word_t: public cand_word_t
     : cand_word_t{}, token{tinf} 
     {}
 
-    void assign_from (cand_word_t && cnd)
+    void assign (cand_word_t && cnd)
     {
         static_cast<cand_word_t &>(*this) = std::move(cnd);
     }

@@ -32,10 +32,13 @@ public:
 
     void set_kind (cand_kind_t const ck) { m_cand_kind = ck;}
 
+    /*
     cand_word_t & push (wdata_t const & wd, str_t && s, cand_kind_t const k)
     {return m_impl.emplace_back(wd, std::move(s), k);}
+    */
 
-    bool insert (wdata_t const & wd, str_view_t const & s)
+    template <typename TStr>
+    bool insert (wdata_t const & wd, TStr && s)
     {
         if (m_best_cnt < wd.cnt )
         {
@@ -49,11 +52,11 @@ public:
             {
                 return false;
             }
-            hback = cand_word_t{wd.id, s, wd.cnt, m_cand_kind};
+            hback = cand_word_t{wd.id, std::forward<TStr>(s), wd.cnt, m_cand_kind};
             reset_heap_impl();
             return true;
         }        
-        m_impl.emplace_back(wd.id, s, wd.cnt, m_cand_kind);
+        m_impl.emplace_back(wd.id, std::forward<TStr>(s), wd.cnt, m_cand_kind);
         reset_heap_impl();
         return true;
     }
@@ -79,6 +82,14 @@ private:
 
 class TSpellCorrector 
 {
+private:
+
+    struct attributes_t
+    {
+        bool        orig_is_known = false
+                ,   sw_orig_is_known = false;
+
+    };
 
 public:
 
@@ -90,10 +101,12 @@ public:
                 ,   SecondLvlPenalty            = 3.0       
                 ,   SwitchedWordPenalty         = 3.0
                 ,   SwitchedWordIsKnownPenalty  = 5.0
-                ,   InFreqWordThreshold         = 10e-7;
+                ,   InFreqWordThreshold         = 10e-7; // experimental!
             ;
 
-        ::std::size_t     MaxCandidatesToCheck = 64;
+        ::std::size_t         MaxCandidatesToCheck = 64
+                            , InFreqWordCntThreshold = 30 // experimental!
+        ;
 
         static opt_t ReadFromEnv();
     };
@@ -111,8 +124,10 @@ public:
 //    bool WordIsKnown( str_view_t const & word) const; 
 
     candidates_t GetCandidates(context_range_t const & context
-        , size_t const position
+        , ::std::size_t const position
     ) const;
+
+    context_t FixContext(std::wstring const & text) const;
 
     std::wstring FixFragment(const std::wstring& text) const;
     
@@ -126,18 +141,39 @@ private:
 
     bool IsInfreq(cand_word_t const & ow) const noexcept
     {
-        return (double(ow.cnt) / LangModel.total_word_occs() )
-            < m_opt.InFreqWordThreshold;
+        //return (double(ow.cnt) / LangModel.total_word_occs() )
+        //    < m_opt.InFreqWordThreshold;
+        return ow.cnt < m_opt.InFreqWordCntThreshold;
     }
 
     bool CandidatesAreInfreq(TCandMgr const & cmgr) const noexcept 
     {
-        return (double(cmgr.best_cnt()) / LangModel.total_word_occs() )
-            < m_opt.InFreqWordThreshold;
+        // return (double(cmgr.best_cnt()) / LangModel.total_word_occs() )
+        //    < m_opt.InFreqWordThreshold;
+        return cmgr.best_cnt() < m_opt.InFreqWordCntThreshold;
     }
 
     TAlphabet const & GetAlphabet() const noexcept
     { return GetLangModel().GetTokenizer().GetAlphabet(); }
+
+    void CheckSwitchedCandidates (context_range_t const & context
+        , ::std::size_t const position
+        , TCandMgr & cmgr
+        , attributes_t & attrs
+    ) const;
+
+    ::std::size_t FormGreedySwitchedCandidates (context_range_t const & context
+        , ::std::size_t const position
+        , TCandMgr & cmgr
+    ) const;
+
+    ::std::size_t FormGreedySwitchedCandidatesRight (
+        context_range_t const & context
+        , ::std::size_t const position
+        , str_view_t const & sw_cand_str
+        , ::std::size_t const lpos
+        , TCandMgr & cmgr        
+    ) const;
 
     void AppendWithCase(std::wstring & result
         , wstr_view_t const & origWord
@@ -191,9 +227,15 @@ private:
     bool LoadCache(const std::string& cacheFile);
     bool SaveCache(const std::string& cacheFile);
 
-    bool LookupAndAppend2Candidates(str_view_t const & w
-        , TCandMgr & candidates
+    bool Append2Candidates (str_view_t const & w
+        , wdata_t const & wd
+        , TCandMgr & cmgr
     ) const;
+
+    bool LookupAndAppend2Candidates(str_view_t const & w
+        , TCandMgr & cmgr
+    ) const
+    {return Append2Candidates(w, LangModel.GetWordInfo(w), cmgr); }
 
     context_crange_t GetSentenceRange( context_crange_t const & sentence
         , std::size_t const pos
@@ -203,16 +245,15 @@ private:
         , std::size_t const pos
     ) const;
 
-    void Score(context_range_t const & context
+    void Score(attributes_t const & attrs
+        , context_range_t const & context
         , std::size_t const pos
         , candidates_t & candidates
-        , bool const sw_orig_is_known
     ) const;
 
-    double ScoreCandidate (double sc
+    double ScoreCandidate (attributes_t const & attrs
+        , double sc
         , cand_kind_t const ck
-        , bool const orig_is_known
-        , bool const sw_orig_is_known 
     ) const;
 
     TLangModel                      LangModel;

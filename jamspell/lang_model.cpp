@@ -650,9 +650,15 @@ wdata_t TLangModel::GetWordInfo(str_view_t const & word) const
     return (it != WordToId.end()) ? it.value() : wdata_t {};
 }
 
+word_t TLangModel::LongestPrefixSearch(str_view_t const & word) const
+{
+    auto it = WordToId.longest_prefix(word);
+    return (it != WordToId.end()) ? word_t{it.value(), str_t{it.key()}} : word_t{};
+}
+
 bool TLangModel::InitWordFromToken(token_info_t const & tinf, word_t & w) const
 {
-    if(tinf.size() < MAX_WORD_LENGTH
+    if(tinf.size() < MAX_WORD_LENGTH * 2u   // concat of two longest words!!!
         && (  w.str = ToAlphabet(Tokenizer.GetAlphabet(), tinf.str())
                 , WellFormedInAlphabet(w.str )
            )
@@ -668,6 +674,9 @@ bool TLangModel::InitWordFromToken(token_info_t const & tinf, word_t & w) const
         }
         return true;
     }
+    // handle long or ill-formed words
+    w.str = str_t{};
+    w.id = word_id_t::Any;
     return false;
 }
 

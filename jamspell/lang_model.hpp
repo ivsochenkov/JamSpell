@@ -135,6 +135,8 @@ public:
 
     wdata_t GetWordInfo(str_view_t const & word) const;
 
+    word_t LongestPrefixSearch(str_view_t const & word) const;
+
     alphabet_type const & GetAlphabet() const { return Tokenizer.GetAlphabet();}
     TTokenizer const & GetTokenizer() const {return Tokenizer;}
 
@@ -258,8 +260,8 @@ void TLangModel::InitContext(TCntxt & cntxt) const
     auto wit = cntxt.begin();
     for (cntxt_word_t & cw : cntxt)
     {
-        wit -> kind = ckOrig;
-        InitWordFromToken(cw.token, *wit++);
+        wit -> kind = cand_kind_t(InitWordFromToken(cw.token, *wit));
+        ++wit;
     }
 }
 
