@@ -110,14 +110,12 @@ int Correct(const std::string& modelFile) {
         std::cerr << "[error] failed to load model" << std::endl;
         return 42;
     }
-    std::cerr << "[info] loaded" << std::endl;
-    std::cerr << ">> ";
+    std::cerr << "[info] loaded\n>> ";
     for (std::string line; std::getline(std::cin, line);) 
     {
         std::wstring wtext = u8_to_w(line);
         std::wstring result = corrector.FixFragment(wtext);
-        std::cerr << w_to_u8(result) << "\n";
-        std::cerr << ">> ";
+        std::cerr << w_to_u8(result) << "\n>> ";
     }
     return 0;
 }

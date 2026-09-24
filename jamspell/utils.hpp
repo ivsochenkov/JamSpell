@@ -39,8 +39,10 @@ inline constexpr std::underlying_type<TWordId>::type to_underlying(TWordId w)
 
 using word_id_t = TWordId;
 
-using TCount = uint32_t;
+using TCount = ::std::uint32_t;
 using cnt_t = TCount;
+
+using pos_t = ::std::uint32_t;
 
 using TWordIds = std::vector<TWordId>;
 using TIdSentences = std::vector<TWordIds>;
@@ -215,29 +217,55 @@ TWIt Advance2Next(TWIt beg, TWIt const & e)
 
 ////////////////////////////////////////////////////////////////////////////////
 
-struct cand_word_t: public word_t
+struct basic_cand_word_t: public word_t
 {
     float           score;  
     cand_kind_t     kind    = ckNone;
 
-    cand_word_t () = default;
+    basic_cand_word_t () = default;
     
     template <typename TStr>
-    cand_word_t (word_id_t const i, TStr && s, cnt_t const c, cand_kind_t const ck)
+    basic_cand_word_t (word_id_t const i, TStr && s, cnt_t const c, cand_kind_t const ck)
     : word_t{i, std::forward<TStr>(s), c}, kind{ck} 
     {}
 
-    /*
-    cand_word_t (wdata_t const & wd
-        , str_t && s
-        , cand_kind_t const k
-    ): word_t{wd, std::move(s)}, kind{k} 
-    {}
-
-    */
-
     bool is_orig() const noexcept { return ckOrig == kind;}
     bool is_none() const noexcept { return ckNone == kind;}
+
+    bool omitted() const noexcept { return is_orig() || is_none() || is_punct();}
+
+    bool was_switched() const noexcept 
+    { return kind == ckOrigSw || kind == ckFirstLvlSw || kind == ckSecondLvlSw;}
+
+};
+
+struct drop_info_t
+{
+    ::std::uint32_t     left = 0u, right = 0u;
+
+    drop_info_t() = default;
+
+    drop_info_t(::std::uint32_t const l, ::std::uint32_t const r)
+    : left{l}, right{r}
+    {}
+};
+
+struct cand_word_t: public basic_cand_word_t
+{    
+    drop_info_t     drop;
+
+    cand_word_t () = default;
+    
+    template <typename TStr>
+    cand_word_t (word_id_t const i
+        , TStr && s
+        , cnt_t const c
+        , cand_kind_t const ck
+        , drop_info_t const & dr
+    )
+    : basic_cand_word_t {i, std::forward<TStr>(s), c , ck}
+    , drop{dr}
+    {}
 
 };
 
@@ -247,17 +275,17 @@ using candidates_crange_t = boost::iterator_range<candidates_t::const_iterator>;
 
 ////////////////////////////////////////////////////////////////////////////////
 
-struct cntxt_word_t: public cand_word_t
+struct cntxt_word_t: public basic_cand_word_t
 {
     cntxt_word_t() = default;
 
     explicit cntxt_word_t(token_info_t const & tinf)
-    : cand_word_t{}, token{tinf} 
+    : basic_cand_word_t{}, token{tinf} 
     {}
 
     void assign (cand_word_t && cnd)
     {
-        static_cast<cand_word_t &>(*this) = std::move(cnd);
+        static_cast<basic_cand_word_t &>(*this) = std::move(cnd);
     }
 
     token_info_t        token;

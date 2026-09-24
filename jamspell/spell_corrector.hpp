@@ -38,7 +38,7 @@ public:
     */
 
     template <typename TStr>
-    bool insert (wdata_t const & wd, TStr && s)
+    bool insert (wdata_t const & wd, TStr && s, drop_info_t const & drop)
     {
         if (m_best_cnt < wd.cnt )
         {
@@ -52,11 +52,15 @@ public:
             {
                 return false;
             }
-            hback = cand_word_t{wd.id, std::forward<TStr>(s), wd.cnt, m_cand_kind};
+            hback = cand_word_t{wd.id, std::forward<TStr>(s), wd.cnt
+                , m_cand_kind, drop
+            };
             reset_heap_impl();
             return true;
         }        
-        m_impl.emplace_back(wd.id, std::forward<TStr>(s), wd.cnt, m_cand_kind);
+        m_impl.emplace_back(wd.id, std::forward<TStr>(s), wd.cnt
+            , m_cand_kind, drop
+        );
         reset_heap_impl();
         return true;
     }
@@ -86,8 +90,10 @@ private:
 
     struct attributes_t
     {
-        bool        orig_is_known = false
-                ,   sw_orig_is_known = false;
+        bool        orig_is_known       = false
+                ,   sw_orig_is_known    = false
+                ,   prev_was_switched   = false
+                ;
 
     };
 
@@ -101,7 +107,7 @@ public:
                 ,   SecondLvlPenalty            = 3.0       
                 ,   SwitchedWordPenalty         = 3.0
                 ,   SwitchedWordIsKnownPenalty  = 5.0
-                ,   InFreqWordThreshold         = 10e-7; // experimental!
+                ; 
             ;
 
         ::std::size_t         MaxCandidatesToCheck = 64
@@ -121,8 +127,6 @@ public:
         , const std::string& modelFile
     );
 
-//    bool WordIsKnown( str_view_t const & word) const; 
-
     candidates_t GetCandidates(context_range_t const & context
         , ::std::size_t const position
     ) const;
@@ -139,7 +143,7 @@ public:
 
 private:
 
-    bool IsInfreq(cand_word_t const & ow) const noexcept
+    bool IsInfreq(word_t const & ow) const noexcept
     {
         //return (double(ow.cnt) / LangModel.total_word_occs() )
         //    < m_opt.InFreqWordThreshold;
@@ -156,24 +160,48 @@ private:
     TAlphabet const & GetAlphabet() const noexcept
     { return GetLangModel().GetTokenizer().GetAlphabet(); }
 
-    void CheckSwitchedCandidates (context_range_t const & context
+    bool HasNonSpacedNeighbours(context_range_t const & context
+        , ::std::size_t const position
+    ) const;
+
+    bool PrevWordWasSwitched(context_range_t const & context
+        , ::std::size_t const position
+    ) const;
+
+    void ManageDroppedTokens(cand_word_t const & top_w
+        , context_t::iterator & al_word_it
+    ) const;
+
+    ::std::size_t CheckSwitchedCands (context_range_t const & context
         , ::std::size_t const position
         , TCandMgr & cmgr
         , attributes_t & attrs
     ) const;
 
-    ::std::size_t FormGreedySwitchedCandidates (context_range_t const & context
-        , ::std::size_t const position
-        , TCandMgr & cmgr
-    ) const;
-
-    ::std::size_t FormGreedySwitchedCandidatesRight (
+    ::std::size_t FormGreedySwitchedCandsRight (
         context_range_t const & context
         , ::std::size_t const position
         , str_view_t const & sw_cand_str
         , ::std::size_t const lpos
-        , TCandMgr & cmgr        
+        , TCandMgr & cmgr       
+        , attributes_t & attrs 
     ) const;
+
+    ::std::size_t MakeLeftSwCandsStrPrefix(context_range_t const & context
+        , ::std::size_t const position
+        , str_t & s
+    ) const;
+
+    ::std::size_t MakeRightSwCandsStr(context_range_t const & context
+        , ::std::size_t const position
+        , str_t & s
+    ) const;
+
+    static ::std::uint32_t CalcRPos(std::size_t cnt
+        , context_range_t const & context
+        , ::std::size_t const position
+        , std::size_t const rpos_ofs
+    );
 
     void AppendWithCase(std::wstring & result
         , wstr_view_t const & origWord
@@ -182,34 +210,26 @@ private:
 
     str_t PuntoSwitcher(str_view_t const &w) const;
 
-    void FormEditsCandidates(bool const orig_is_known
-        , cand_kind_t const ck
-        , str_view_t const & s
-        , TCandMgr & result
-    ) const;
-
-    void FormEditsCandidatesExt(bool const orig_is_known
-        , cand_kind_t const ck
-        , str_view_t const & s
-        , TCandMgr & result
-    ) const;
-
     void Edits(str_view_t const & word
         , TCandMgr & candidates
+        , drop_info_t const & di = drop_info_t{}
     ) const;
 
     std::size_t Edits2(str_view_t const & word
         , TCandMgr & candidates
+        , drop_info_t const & di = drop_info_t{}
     ) const;
 
     void InsertsImpl(str_view_t const& w
         , std::size_t const i
         , TCandMgr& result
         , str_t & buf
+        , drop_info_t const & di
     ) const;
     void Inserts(str_view_t const & w
         , TCandMgr& result
         , str_t & s
+        , drop_info_t const & di
     ) const;
 
     void Inserts2Impl(str_view_t const & w
@@ -217,9 +237,11 @@ private:
         , TCandMgr& result
         , str_t & s
         , str_t & buf
+        , drop_info_t const & di
     ) const;
     void Inserts2(str_view_t const & w
         , TCandMgr& result
+        , drop_info_t const & di
     ) const;
 
 
@@ -227,15 +249,23 @@ private:
     bool LoadCache(const std::string& cacheFile);
     bool SaveCache(const std::string& cacheFile);
 
+    bool Push2Candidates (str_t && w
+        , wdata_t const & wd
+        , TCandMgr & cmgr
+        , drop_info_t const & di //= drop_info_t{}
+    ) const;
+
     bool Append2Candidates (str_view_t const & w
         , wdata_t const & wd
         , TCandMgr & cmgr
+        , drop_info_t const & di //= drop_info_t{}
     ) const;
 
     bool LookupAndAppend2Candidates(str_view_t const & w
         , TCandMgr & cmgr
+        , drop_info_t const & di //= drop_info_t{}
     ) const
-    {return Append2Candidates(w, LangModel.GetWordInfo(w), cmgr); }
+    {return Append2Candidates(w, LangModel.GetWordInfo(w), cmgr, di); }
 
     context_crange_t GetSentenceRange( context_crange_t const & sentence
         , std::size_t const pos

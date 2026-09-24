@@ -10,12 +10,10 @@ std::string GetCandidates(const NJamSpell::TSpellCorrector& corrector
     using namespace NJamSpell;
 
     std::wstring input = u8_to_w(text);
-    corrector.GetLangModel().GetTokenizer().FilterHyphen(input);
+    //corrector.GetLangModel().GetTokenizer().FilterHyphen(input);
     
     wstr_view_t const orig_txt(input);
-
-    context_t cntxt;
-    corrector.GetLangModel().Text2Words(orig_txt, cntxt);
+    context_t cntxt = corrector.FixContext(input);
 
     nlohmann::json results;
     results["results"] = nlohmann::json::array();
@@ -35,12 +33,12 @@ std::string GetCandidates(const NJamSpell::TSpellCorrector& corrector
             ; ++j, ++al_word_it
         ) 
         {
-            if (!al_word_it -> good())
+            if (al_word_it -> is_none() || !al_word_it -> is_word())
             {
                 continue;
             }
 
-            cand_word_t & curr_word = *al_word_it;
+            cntxt_word_t & curr_word = *al_word_it;
             candidates_t candidates {corrector.GetCandidates(curr_sent_ctxt, j)};
             if (!candidates.empty()) 
             {
