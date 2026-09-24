@@ -268,7 +268,7 @@ context_t TSpellCorrector::FixContext(std::wstring const & text) const
                 if(curr_word.score < top_w.score && top_w.id != curr_word.id)
                 {
                     // Note: ManageDroppedTokens advances al_word_it!
-                    ManageDroppedTokens(top_w, al_word_it);  
+                    pos += ManageDroppedTokens(top_w, al_word_it);  
                     curr_word.assign(std::move(top_w));                    
                 }
             }
@@ -366,7 +366,7 @@ bool TSpellCorrector::PrevWordWasSwitched(context_range_t const & context
 }
 
 
-void TSpellCorrector::ManageDroppedTokens(cand_word_t const & top_w 
+std::size_t TSpellCorrector::ManageDroppedTokens(cand_word_t const & top_w 
     , context_t::iterator & al_word_it
 ) const
 {
@@ -380,14 +380,15 @@ void TSpellCorrector::ManageDroppedTokens(cand_word_t const & top_w
     
     token_info_t::len_type l = 0u; 
     for(::std::uint32_t i = 0; i < top_w.drop.right; ++i)
-    {
-        (++al_word_it) -> kind = ckNone;
+    {        
+        (++al_word_it) -> kind = ckNone;        
         l += al_word_it -> token.size();
     }
 
     curr_word.token.reset(ltoken.ofs()
         , curr_word.token.ofs() - ltoken.ofs() + curr_word.token.size() + l 
     );
+    return top_w.drop.right;
 }
 
 ::std::size_t TSpellCorrector::CheckSwitchedCands (context_range_t const & context

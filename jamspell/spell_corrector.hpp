@@ -168,7 +168,7 @@ private:
         , ::std::size_t const position
     ) const;
 
-    void ManageDroppedTokens(cand_word_t const & top_w
+    std::size_t  ManageDroppedTokens(cand_word_t const & top_w
         , context_t::iterator & al_word_it
     ) const;
 
