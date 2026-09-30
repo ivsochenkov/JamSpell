@@ -23,7 +23,8 @@ public:
 
     using letter_type = wchar_t;
 
-    static constexpr letter_type const UniversalCh = 0, SepCh = L'#';
+    static constexpr letter_type const UniversalCh = 0, SepCh = L'#'
+        , SepCVCh = L'$';
 
     using subs_type = std::vector<char>;
 
@@ -61,12 +62,15 @@ private:
     {
         subs_type       subs;
         letter_type     letter;
+        kindCV_t        kindCV;
+
+        // add kindCV here!
 
         explicit subs_info_t (letter_type const wc = UniversalCh)
-        : subs{}, letter(wc) 
+        : subs{}, letter(wc), kindCV{kindCV_t::cvkUndefined}
         {}
 
-        HANDYPACK(subs, letter)
+        HANDYPACK(subs, letter, kindCV)
 
     };
 
@@ -116,6 +120,9 @@ public:
     subs_type const & GetSubstitutes (char const ch) const 
     { return m_subst[std::size_t(ch)].subs;}
 
+    kindCV_t GetLetterKind (char const ch) const 
+    { return m_subst[std::size_t(ch)].kindCV;}
+
     bool Contains(letter_type const ch) const 
     {return GetPos(ch) != pos_t::Undefined; }
 
@@ -137,7 +144,9 @@ private:
     pos_t GetPos (letter_type const ch) const;
 
     void LoadPunto (letter_type const chr, std::wstring_view const & switched_letters);
-    void LoadSubst (subs_type & sbst, std::wstring_view const & lttrs);
+    void LoadSubst (subs_info_t & subs_info, std::wstring_view lttrs);
+    void LoadSubstLetters (subs_type & subs, std::wstring_view const & lttrs);
+    static void FinalizeSubst(subs_type & subs);
 
 public: 
 
@@ -156,13 +165,23 @@ private:
 
 };
 
-bool WellFormedInAlphabet(std::string_view const & src);
+//bool WellFormedInAlphabet(std::string_view const & src);
 
-void ToAlphabet(TAlphabet const & alphabet
-    , std::wstring_view const & src
+bool ToAlphabet(TAlphabet const & alphabet
+    , wstr_view_t const & src
     , str_t & res
 );
-str_t ToAlphabet(TAlphabet const & alphabet, wstr_view_t const & src);
+
+bool ToAlphabet(TAlphabet const & alphabet
+    , wstr_view_t const & src
+    , str_t & res
+    , token_stat_t & ts
+);
+
+str_t ToAlphabet(TAlphabet const & alphabet
+    , wstr_view_t const & src
+    , token_stat_t & ts
+);
 
 std::wstring FromAlphabet(TAlphabet const & alphabet, str_view_t const & src) ;
 

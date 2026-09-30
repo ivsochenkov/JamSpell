@@ -32,6 +32,17 @@ std::string Tokens2Str (text_tokens_t const & tokens)
 }
 #endif
 
+kindCV_t GetCVKind(wchar_t const c)
+{
+    switch (c)
+    {
+        case 'C':   return kindCV_t::cvkConsonant;
+        case 'V':   return kindCV_t::cvkVowel;    
+        default:    return kindCV_t::cvkUndefined;
+    };
+    return kindCV_t::cvkUndefined;
+}
+
 uint64_t GetCurrentTimeMs() {
     using namespace std::chrono;
     milliseconds ms = duration_cast<milliseconds>(system_clock::now().time_since_epoch());

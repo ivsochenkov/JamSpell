@@ -38,7 +38,7 @@ public:
     */
 
     template <typename TStr>
-    bool insert (wdata_t const & wd, TStr && s, drop_info_t const & drop)
+    bool insert (wdata_t const & wd, TStr && s, concat_inf_t const & drop)
     {
         if (m_best_cnt < wd.cnt )
         {
@@ -90,10 +90,11 @@ private:
 
     struct attributes_t
     {
-        bool        orig_is_known       = false
-                ,   sw_orig_is_known    = false
-                ,   prev_was_switched   = false
-                ;
+        ::std::uint8_t      non_spaced_cnt      = 0;
+        bool                orig_is_known       = false
+                        ,   sw_orig_is_known    = false
+                        ,   prev_was_switched   = false
+                        ;
 
     };
 
@@ -123,8 +124,11 @@ public:
     bool LoadLangModel(const std::string& modelFile);
     
     bool TrainLangModel(const std::string& textFile
+        , const std::string & dictFile
         , const std::string& alphabetFile
         , const std::string& modelFile
+        , TLangModel::train_options_t const & tr_opt 
+            = TLangModel::train_options_t::ReadFromEnv()
     );
 
     candidates_t GetCandidates(context_range_t const & context
@@ -160,7 +164,7 @@ private:
     TAlphabet const & GetAlphabet() const noexcept
     { return GetLangModel().GetTokenizer().GetAlphabet(); }
 
-    bool HasNonSpacedNeighbours(context_range_t const & context
+    concat_inf_t CntNonSpacedNeighbours(context_range_t const & context
         , ::std::size_t const position
     ) const;
 
@@ -176,24 +180,27 @@ private:
         , ::std::size_t const position
         , TCandMgr & cmgr
         , attributes_t & attrs
+        , concat_inf_t const & ci
     ) const;
 
     ::std::size_t FormGreedySwitchedCandsRight (
         context_range_t const & context
         , ::std::size_t const position
         , str_view_t const & sw_cand_str
-        , ::std::size_t const lpos
         , TCandMgr & cmgr       
         , attributes_t & attrs 
+        , concat_inf_t const & ci
     ) const;
 
-    ::std::size_t MakeLeftSwCandsStrPrefix(context_range_t const & context
+    void MakeLeftSwCandsStrPrefix(context_range_t const & context
         , ::std::size_t const position
+        , concat_inf_t const & ci
         , str_t & s
     ) const;
 
-    ::std::size_t MakeRightSwCandsStr(context_range_t const & context
+    void MakeRightSwCandsStr(context_range_t const & context
         , ::std::size_t const position
+        , concat_inf_t const & ci
         , str_t & s
     ) const;
 
@@ -212,24 +219,24 @@ private:
 
     void Edits(str_view_t const & word
         , TCandMgr & candidates
-        , drop_info_t const & di = drop_info_t{}
+        , concat_inf_t const & di = concat_inf_t{}
     ) const;
 
     std::size_t Edits2(str_view_t const & word
         , TCandMgr & candidates
-        , drop_info_t const & di = drop_info_t{}
+        , concat_inf_t const & di = concat_inf_t{}
     ) const;
 
     void InsertsImpl(str_view_t const& w
         , std::size_t const i
         , TCandMgr& result
         , str_t & buf
-        , drop_info_t const & di
+        , concat_inf_t const & di
     ) const;
     void Inserts(str_view_t const & w
         , TCandMgr& result
         , str_t & s
-        , drop_info_t const & di
+        , concat_inf_t const & di
     ) const;
 
     void Inserts2Impl(str_view_t const & w
@@ -237,11 +244,11 @@ private:
         , TCandMgr& result
         , str_t & s
         , str_t & buf
-        , drop_info_t const & di
+        , concat_inf_t const & di
     ) const;
     void Inserts2(str_view_t const & w
         , TCandMgr& result
-        , drop_info_t const & di
+        , concat_inf_t const & di
     ) const;
 
 
@@ -252,18 +259,18 @@ private:
     bool Push2Candidates (str_t && w
         , wdata_t const & wd
         , TCandMgr & cmgr
-        , drop_info_t const & di //= drop_info_t{}
+        , concat_inf_t const & di //= concat_inf_t{}
     ) const;
 
     bool Append2Candidates (str_view_t const & w
         , wdata_t const & wd
         , TCandMgr & cmgr
-        , drop_info_t const & di //= drop_info_t{}
+        , concat_inf_t const & di //= concat_inf_t{}
     ) const;
 
     bool LookupAndAppend2Candidates(str_view_t const & w
         , TCandMgr & cmgr
-        , drop_info_t const & di //= drop_info_t{}
+        , concat_inf_t const & di //= concat_inf_t{}
     ) const
     {return Append2Candidates(w, LangModel.GetWordInfo(w), cmgr, di); }
 
@@ -271,7 +278,8 @@ private:
         , std::size_t const pos
     ) const;
 
-    double ScoreOrig(context_range_t const & orig_sent
+    float ScoreOrig(attributes_t const & attrs
+        , context_range_t const & orig_sent
         , std::size_t const pos
     ) const;
 
@@ -281,8 +289,8 @@ private:
         , candidates_t & candidates
     ) const;
 
-    double ScoreCandidate (attributes_t const & attrs
-        , double sc
+    float ScoreCandidate (attributes_t const & attrs
+        , float sc
         , cand_kind_t const ck
     ) const;
 

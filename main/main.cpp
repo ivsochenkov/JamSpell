@@ -10,19 +10,31 @@ using namespace NJamSpell;
 
 void PrintUsage(const char** argv) {
     std::cerr << "Usage: " << argv[0] << " mode args" << std::endl;
-    std::cerr << "    train alphabet.txt dataset.txt resultModel.bin  - train model" << std::endl;
+    std::cerr << "    train alphabet.txt dict.txt dataset.txt resultModel.bin  - train model" << std::endl;
     std::cerr << "    score model.bin - input sentences and get score" << std::endl;
     std::cerr << "    correct model.bin - input sentences and get corrected one" << std::endl;
     std::cerr << "    fix model.bin input.txt output.txt - automatically fix txt file" << std::endl;
 }
 
 int Train(const std::string& alphabetFile,
+          const std::string& dictFile,
           const std::string& datasetFile,
           const std::string& resultModelFile)
 {
+    /*
     TLangModel model;
-    model.Train(datasetFile, alphabetFile);
+    model.Train(datasetFile, dictFile, alphabetFile
+        , TLangModel::train_options_t::make_default()
+    );
     model.Dump(resultModelFile);
+    */
+
+    TSpellCorrector corr;
+
+    if(!corr.TrainLangModel(datasetFile, dictFile, alphabetFile, resultModelFile))
+    {
+        return 42;
+    };
     return 0;
 }
 
@@ -131,10 +143,12 @@ int main(int argc, const char** argv) {
             PrintUsage(argv);
             return 42;
         }
-        std::string alphabetFile = argv[2];
-        std::string datasetFile = argv[3];
-        std::string resultModelFile = argv[4];
-        return Train(alphabetFile, datasetFile, resultModelFile);
+        std::string     alphabetFile = argv[2]
+                    ,   dictFile = argv[3]
+                    ,   datasetFile = argv[4]
+                    ,   resultModelFile = argv[5];
+
+        return Train(alphabetFile, dictFile, datasetFile, resultModelFile);
     } else if (mode == "score") {
         if (argc < 3) {
             PrintUsage(argv);

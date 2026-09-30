@@ -42,8 +42,6 @@ using word_id_t = TWordId;
 using TCount = ::std::uint32_t;
 using cnt_t = TCount;
 
-using pos_t = ::std::uint32_t;
-
 using TWordIds = std::vector<TWordId>;
 using TIdSentences = std::vector<TWordIds>;
 
@@ -54,15 +52,35 @@ using str_view_t = std::string_view;
 //using str_t = std::string;
 using str_t = boost::container::string;
 
-/// @brief /////////////////////////////////////////////////////////////////////
+enum class kindCV_t : unsigned char
+{
+    cvkUndefined = 0,
+    cvkVowel,
+    cvkConsonant
+};
+
+struct token_stat_t
+{
+    std::uint8_t        vowel_cnt               = 0u
+                    ,   consonant_cnt           = 0u
+                    ,   max_vovel_in_row        = 0u        
+                    ,   max_consonant_in_row    = 0u
+                    ;
+    bool                is_title_case = false;
+};
+
+///////////////////////////////////////////////////////////////////////////////
 
 struct token_info_t
 {
     using ofs_type = ::std::uint32_t;
     using len_type = ::std::uint32_t;
 
-    explicit token_info_t(wstr_view_t const & txt, ofs_type const ofs = -1, len_type const l = 0u)
-    : m_pTxt(txt.data()), m_ofs{ofs}, m_len{l}
+    explicit token_info_t(wstr_view_t const & txt
+        , ofs_type const ofs = -1
+        , len_type const l = 0u
+    )
+    : m_pTxt(txt.data()), m_stat{}, m_ofs{ofs}, m_len{l}
     {}
 
     token_info_t () {};
@@ -99,12 +117,17 @@ struct token_info_t
     constexpr ofs_type ofs () const {return m_ofs;}
     constexpr ofs_type end_ofs () const {return m_ofs + m_len;}
     constexpr len_type size () const {return m_len;}
+
+    token_stat_t const & stat() const {return m_stat;}
+    token_stat_t & stat() {return m_stat;}
     
 private:
 
     wstr_view_t::value_type const       * m_pTxt   = nullptr;
+    token_stat_t                        m_stat;
     ofs_type                            m_ofs    = -1;
     len_type                            m_len    = 0u;
+
 };
 
 //using text_tokens_t    = std::vector<wstr_view_t>;
@@ -239,20 +262,20 @@ struct basic_cand_word_t: public word_t
 
 };
 
-struct drop_info_t
+struct concat_inf_t
 {
     ::std::uint32_t     left = 0u, right = 0u;
 
-    drop_info_t() = default;
+    concat_inf_t() = default;
 
-    drop_info_t(::std::uint32_t const l, ::std::uint32_t const r)
+    concat_inf_t(::std::uint32_t const l, ::std::uint32_t const r)
     : left{l}, right{r}
     {}
 };
 
 struct cand_word_t: public basic_cand_word_t
 {    
-    drop_info_t     drop;
+    concat_inf_t     drop;
 
     cand_word_t () = default;
     
@@ -261,7 +284,7 @@ struct cand_word_t: public basic_cand_word_t
         , TStr && s
         , cnt_t const c
         , cand_kind_t const ck
-        , drop_info_t const & dr
+        , concat_inf_t const & dr
     )
     : basic_cand_word_t {i, std::forward<TStr>(s), c , ck}
     , drop{dr}
@@ -296,6 +319,17 @@ using context_range_t = boost::iterator_range<context_t::iterator>;
 using context_crange_t = boost::iterator_range<context_t::const_iterator>;
 
 ////////////////////////////////////////////////////////////////////////////////
+
+enum class dict_info_t : unsigned char 
+{
+    diNone = 0,
+    diIncluded,
+    diExcluded
+};
+
+////////////////////////////////////////////////////////////////////////////////
+
+kindCV_t GetCVKind(wchar_t const c);
 
 template <typename TWrds>
 void ReserveWords(TWrds & wrds, wstr_view_t const & txt)
@@ -340,6 +374,11 @@ inline wchar_t MakeLower(wchar_t orig)
 inline wchar_t MakeUpper(wchar_t orig)
 {
     return GetWCtype().toupper(orig);
+}
+
+inline void RTrim(::std::string & s) 
+{
+    s.erase(s.find_last_not_of(" \n\r\t") + 1u);
 }
 
 inline wchar_t MakeUpperIfRequired(wchar_t const orig, wchar_t const sample) 

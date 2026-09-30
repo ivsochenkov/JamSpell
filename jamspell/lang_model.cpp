@@ -26,6 +26,44 @@
 namespace NJamSpell 
 {
 
+std::size_t CDict::Load(std::string const & dictFnam)
+{
+    static constexpr ::std::size_t avg_word_len = 4u;
+    static constexpr wchar_t ExclSgnCh = L'~';
+
+    std::size_t const file_sz = std::filesystem::file_size(dictFnam);
+    m_dict.reserve(16ul + file_sz / avg_word_len);
+    std::ifstream in(dictFnam, std::ios::binary);
+    if(!in)
+    {
+        return false;
+    }
+
+    std::size_t lcnt{0ul};
+    std::string l;
+    while (!in.eof())
+    {            
+        std::getline(in, l);
+        RTrim(l);
+        if(!l.empty())
+        {            
+            std::wstring const & w = u8_to_w(l);
+            wstr_view_t wrd {w};
+            dict_info_t const di = (w.front() == ExclSgnCh) ?
+                (wrd.remove_prefix(1u), dict_info_t::diExcluded) 
+                : dict_info_t::diIncluded;
+            
+            str_t s;
+            if(ToAlphabet(m_alphabet, wrd, s))
+            {
+                lcnt += m_dict.insert(std::move(s), di).second;
+            }
+            
+        }
+    }
+    return lcnt;
+}
+
 TLangModel::train_options_t TLangModel::train_options_t::make_default()
 {
     return train_options_t{};
@@ -139,14 +177,20 @@ struct TLangModel::TGramLoader
     using word_id_set_type = tsl::robin_set<TWordId>;
 
     TLangModel                  &   LM;
+    CDict                           m_dict;
     train_options_t                 m_tr_opt;
     grams_type                      m_grams;    
 
-    std::size_t                     trainText_size
+    ::std::size_t                   trainText_size
                                 ,   sentences_size
                                 ;
 
-    explicit TGramLoader(TLangModel & lm, train_options_t const & tr_opt);
+    TGramLoader(TLangModel & lm, train_options_t const & tr_opt);
+
+    ::std::size_t LoadDict(std::string const& dictFNam)
+    {
+        return m_dict.Load(dictFNam);
+    }
 
     unsigned get_threshold(TGramKey::ngram_type ngr_kind) const 
     { 
@@ -160,14 +204,26 @@ struct TLangModel::TGramLoader
 
 private:
 
+    TAlphabet const & GetAlphabet() const 
+    {
+        return LM.Tokenizer.GetAlphabet();
+    }
+
+    bool TokenIsBad(str_view_t const & alStr, token_stat_t const & ts) const
+    {
+        dict_info_t const di = m_dict.Get(alStr);
+        return (di == dict_info_t::diExcluded) 
+            || (di != dict_info_t::diIncluded) && LM.TokenIsBad(alStr, ts);           
+    }
+
+    ::std::size_t PopulateFromDict() const;
+
     void ProcessText(std::string const & trainText );
 
     void PrintStatus(uint64_t & last_time, float const prc);
     void PrintDictStatus (uint64_t & last_time, float const prc);
 
-    void FillGramms(text_tokens_const_iterator_t b
-        , text_tokens_const_iterator_t const & e
-    );
+    void FillGramms(text_tokens_iterator_t b, text_tokens_iterator_t const & e);
 
     void Reduce ();
 
@@ -192,19 +248,28 @@ private:
 
 };
 
-TLangModel::TGramLoader::TGramLoader(TLangModel & lm, train_options_t const & tr_opt)
+TLangModel::TGramLoader::TGramLoader(TLangModel & lm
+    , train_options_t const & tr_opt
+)
 : LM(lm)
+, m_dict(LM.GetAlphabet())
 , m_tr_opt{tr_opt}
 , trainText_size{0}, sentences_size{0}
 {
     //LM.WordToId.reserve (m_tr_opt.max_grams_sz / 3);
     //m_grams.reserve(m_tr_opt.max_grams_sz * m_tr_opt.growth_factor);
     m_grams.reserve(m_tr_opt.max_grams_sz * 1.002);  // some reserve
+    
 }
+
+
 
 bool TLangModel::TGramLoader::Train(const std::string& fName)
 {
+    ::std::size_t const dsz = PopulateFromDict();
+    std::cerr << "[info] populated from dict: " << dsz << " items in dict\n";
     std::cerr << "[info] generating N-grams... " << std::endl;
+    
     std::size_t const file_sz = std::filesystem::file_size(fName);
     std::ifstream in(fName, std::ios::binary);
     if(!in)
@@ -230,6 +295,23 @@ bool TLangModel::TGramLoader::Train(const std::string& fName)
     }
     Reduce();          
     return lcnt;  
+}
+
+::std::size_t TLangModel::TGramLoader::PopulateFromDict() const
+{
+    ::std::size_t cnt = 0u;
+    m_dict.VisitAll([this, &cnt] (auto const & i) 
+        {
+            if( i.value() == dict_info_t::diIncluded)
+            {
+                LM.UpdateWordId(str_view_t{i.key(), i.key_size()}
+                    , m_tr_opt.ngram_thresholds[0u] 
+                );
+                ++cnt;
+            }
+        }
+    );
+    return cnt;
 }
 
 void TLangModel::TGramLoader::ProcessText(std::string const & txt )
@@ -268,31 +350,41 @@ void TLangModel::TGramLoader::PrintDictStatus(uint64_t & last_time, float const 
     }           
 }
 
-void TLangModel::TGramLoader::FillGramms(text_tokens_const_iterator_t b
-    , text_tokens_const_iterator_t const & e
+void TLangModel::TGramLoader::FillGramms(text_tokens_iterator_t b
+    , text_tokens_iterator_t const & e
 )
 { 
     TGramKey gram_key;
     str_t alStr;
     for (bool it_is_all_over = (b == e); (!it_is_all_over) && b != e; ++b )
     {
-        unsigned c = 0;
+        unsigned c = 0u;
         for(
             ; (!(it_is_all_over = (b == e))) && !(TTokenizer::isSentEnd(*b))
             ; ++b 
         )
         {
             if( b -> size() > MAX_WORD_LENGTH 
-                || (     ToAlphabet(LM.Tokenizer.GetAlphabet(), b -> str(), alStr)
-                    ,   !WellFormedInAlphabet(alStr)
-                   )
+                ||  (!ToAlphabet(GetAlphabet(), b -> str(), alStr, b -> stat()))
             )
             {
-                c = 0;
+                c = 0u;
                 continue;
             }
 
-            gram_key[c] = LM.UpdateWordId(alStr);
+            if( TokenIsBad(alStr, b -> stat()) )
+            {                
+                if (TWordId::Unknown == (gram_key[c] = LM.UpdateWordIdIfPresent(alStr)))
+                {
+                    c = 0u;
+                    continue;
+                }
+            }
+            else 
+            {
+                gram_key[c] = LM.UpdateWordId(alStr);
+            }
+            
             ++LM.TotalWords;
 
             if (c > 0)
@@ -453,25 +545,34 @@ void InitializeBuckets(const T& grams
 }
 
 
-
-bool TLangModel::Train(const std::string& fileName
+bool TLangModel::Train(const std::string& datasetFIle
+    , const std::string& dictFile
     , const std::string& alphabetFile
     , train_options_t const & tr_opt
 ) 
 {
 
-    std::cerr << "[info] loading text" << std::endl;
+    std::cerr << "[info] loading alphabet..." << std::endl;
     uint64_t trainStarTime = GetCurrentTimeMs();
     if (!Tokenizer.LoadAlphabet(alphabetFile)) 
     {
         std::cerr << "[error] failed to load alphabet" << std::endl;
         return false;
     }
-    
+
     TGramLoader gldr{*this, tr_opt};
-    if(!gldr.Train(fileName))
+    std::cerr << "[info] loading dict..." << std::endl;
+    if (!gldr.LoadDict(dictFile)) 
     {
-        std::cerr << "[error] failed to load grams" << std::endl;
+        std::cerr << "[error] failed to load dict!" << std::endl;
+        return false;
+    }
+
+    std::cerr << "[info] processing text..." << std::endl;    
+    
+    if(!gldr.Train(datasetFIle))
+    {
+        std::cerr << "[error] failed to train!" << std::endl;
         return false;
     }
 
@@ -510,7 +611,7 @@ bool TLangModel::Train(const std::string& fileName
     return true;
 }
 
-double TLangModel::Score(text_tokens_t & words) const 
+float TLangModel::Score(text_tokens_t & words) const 
 {
     if (words.empty()) {
         return std::numeric_limits<double>::min();
@@ -523,7 +624,7 @@ double TLangModel::Score(text_tokens_t & words) const
     return Score(txt_words.begin(), txt_words.end());
 }
 
-double TLangModel::Score(std::wstring const & str ) const 
+float TLangModel::Score(std::wstring const & str ) const 
 {
     text_tokens_t orig_txt_tokens = GetTokenizer().Parse(str);
     GetTokenizer().Filter4Spell(orig_txt_tokens);
@@ -598,38 +699,6 @@ std::size_t TLangModel::avg_word_length(std::size_t max_probes) const
     return std::max(unsigned(double(s) / n) + 1u, 1u);
 }
 
-TWordId TLangModel::UpdateWordId(str_view_t const & word)
-{
-    assert(!word.empty());
-    assert(word.size() < 200);
-    
-    auto insR = WordToId.emplace(word, wdata_t{TWordId (LastWordID), 0u} );
-    insR.first.value().cnt += 1u;
-    LastWordID += insR.second;
-    return insR.first.value().id;
-}
-
-TWordId TLangModel::GetWordId(str_view_t const & word) const 
-{
-    auto it = WordToId.find(word);
-    return (it != WordToId.end()) ? it.value().id : TWordId::Unknown;
-}
-
-/*
-str_t TLangModel::GetWord(str_view_t const & word) const 
-{
-    str_t s;
-    auto it = WordToId.find(word);
-    if (it != WordToId.end()) 
-    {
-        s.reserve(word.size());
-        it.key(s);
-        return s;
-    }
-    return s;
-}
-*/
-
 void TLangModel::Text2Words(wstr_view_t const & txt, words_t & wrds) const
 {
     text_tokens_t txt_toks = GetTokenizer().Parse(txt);
@@ -656,12 +725,10 @@ word_t TLangModel::LongestPrefixSearch(str_view_t const & word) const
     return (it != WordToId.end()) ? word_t{it.value(), str_t{it.key()}} : word_t{};
 }
 
-bool TLangModel::InitWordFromToken(token_info_t const & tinf, word_t & w) const
-{
+bool TLangModel::InitWordFromToken(token_info_t & tinf, word_t & w) const
+{    
     if(tinf.size() < MAX_WORD_LENGTH * 2u   // concat of two longest words!!!
-        && (  w.str = ToAlphabet(Tokenizer.GetAlphabet(), tinf.str())
-                , WellFormedInAlphabet(w.str )
-           )
+        && ToAlphabet(Tokenizer.GetAlphabet(), tinf.str(), w.str, tinf.stat())
     )
     {   
         if(tinf.size() == 1 && Tokenizer.isPunct(tinf.str().front()))
@@ -675,11 +742,10 @@ bool TLangModel::InitWordFromToken(token_info_t const & tinf, word_t & w) const
         return true;
     }
     // handle long or ill-formed words
-    w.str = str_t{};
+    //w.str = str_t{};
     w.id = word_id_t::Any;
     return false;
 }
-
 
 double TLangModel::CalcGram2Prob(wdata_t const & winf1
     , wdata_t const & winf2

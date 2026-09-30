@@ -60,17 +60,22 @@ bool TAlphabet::LoadFromFile (std::string const & fPath)
     while (!in.eof())
     {  
         std::string l;        
-        std::getline(in, l); 
+        std::getline(in, l);
+        RTrim(l); 
 
         if(l.empty())
+        {
             continue;
+        }
 
         std::wstring lcnverted (u8_to_w(l));
         wchar_t const chr = lcnverted[0];
-        if (isIgnorable(chr)) 
+        if (isIgnorable(chr))
+        { 
             continue;
+        }
 
-        lines.push_back(std::move(lcnverted));
+        lines.emplace_back(std::move(lcnverted));
 
         pos_t idx;
         AddLetter(chr, idx);
@@ -121,7 +126,7 @@ void TAlphabet::LoadLines(strings_type const & lines )
 
         std::size_t punto_end_pos;
         if(lcontent[1] != SepCh
-            || ((punto_end_pos = lcontent.find(SepCh, 2)) == std::wstring::npos)
+            || ((punto_end_pos = lcontent.find(SepCh, 2u)) == std::wstring::npos)
         )
         {
             throw std::runtime_error("bad alpahbet format: ill-formed line \'" 
@@ -130,14 +135,12 @@ void TAlphabet::LoadLines(strings_type const & lines )
         }
 
         LoadPunto(lcontent[0], lcontent.substr(2u, punto_end_pos - 2u ));
-        LoadSubst(subst_it -> subs, lcontent.substr(punto_end_pos + 1u));
+        LoadSubst(*subst_it, lcontent.substr(punto_end_pos + 1u));
     }
 
     std::sort(m_switches.begin(), m_switches.end());
-    std::sort(m_all.begin(), m_all.end());
-    m_all.resize(std::distance(m_all.begin(), std::unique(m_all.begin(), m_all.end())));
+    FinalizeSubst(m_all);
     m_all.shrink_to_fit();
-
 }
 
 TAlphabet::pos_t TAlphabet::GetPos ( letter_type const ch) const
@@ -166,23 +169,40 @@ void TAlphabet::LoadPunto(letter_type const chr
     }
 }
 
-void TAlphabet::LoadSubst (subs_type & sbst, std::wstring_view const & lttrs)
+void TAlphabet::LoadSubst (subs_info_t & subs_info, std::wstring_view lttrs)
 {
-    sbst.reserve(lttrs.size());
+    if(lttrs[lttrs.size() - 2u] == SepCVCh)
+    {
+        subs_info.kindCV = GetCVKind(lttrs.back());
+        lttrs.remove_suffix(2u);
+    }
+
+    LoadSubstLetters(subs_info.subs, lttrs);
+}
+
+void TAlphabet::LoadSubstLetters(subs_type & subs, std::wstring_view const & lttrs)
+{
+    subs.reserve(lttrs.size());
     for (letter_type wc : lttrs)
     {
         char const c = Wch2Ch(wc);
         if(c)
         {
-            sbst.push_back(c);
+            subs.push_back(c);
         }
     }
-    std::sort(sbst.begin(), sbst.end());
-    sbst.resize(std::distance(sbst.begin(), std::unique(sbst.begin(), sbst.end())));
-    m_all.insert(m_all.end(), sbst.begin(), sbst.end());
+    FinalizeSubst(subs);
+    m_all.insert(m_all.end(), subs.begin(), subs.end());
 }
 
-bool WellFormedInAlphabet(std::string_view const & src)
+void TAlphabet::FinalizeSubst(subs_type & subs)
+{
+    std::sort(subs.begin(), subs.end());
+    subs.resize(std::distance(subs.begin(), std::unique(subs.begin(), subs.end())));
+}
+
+/*
+bool WellFormedInAlphabet(str_view_t & src)
 {
     for(char c : src)
     {
@@ -192,27 +212,92 @@ bool WellFormedInAlphabet(std::string_view const & src)
     return true;
 }
 
-void ToAlphabet(TAlphabet const & alphabet
-    , std::wstring_view const & src
+*/
+
+bool ToAlphabet(TAlphabet const & alphabet
+    , wstr_view_t const & src
     , str_t & res
 )
 {
     res.resize(src.size(), '\0');
     auto tgt = res.begin();
-    for(auto it = src.begin(), e = src.end()
-        ; it != e
-        ; *(tgt++) = alphabet.Wch2Ch(*it++)
-    ){}
+    for(wchar_t const src_ch: src)
+    {
+        if(TAlphabet::UniversalCh == (*tgt++ = alphabet.Wch2Ch(src_ch)))
+        {
+            res.clear();
+            return false;
+        }
+    }
+    return true;
 }
 
-str_t ToAlphabet(TAlphabet const & alphabet, std::wstring_view const & src)
+bool ToAlphabet(TAlphabet const & alphabet
+    , wstr_view_t const & src
+    , str_t & res
+    , token_stat_t & ts
+)
+{
+    auto const & curr_loc = GetLocale();
+
+    ts.is_title_case = true;
+
+    std::uint8_t vow_in_row = 0u, cons_in_row = 0;
+    res.resize(src.size(), '\0');
+    auto tgt = res.begin();
+    for(auto it = src.begin(), e = src.end(); it != e; ++tgt, ++it)
+    {
+        wchar_t const src_ch = *it;
+        *tgt = alphabet.Wch2Ch(src_ch);
+        if(*tgt == TAlphabet::UniversalCh)
+        {
+            res.clear();
+            return false;
+        }
+        kindCV_t const cvk = alphabet.GetLetterKind(*tgt);
+        bool const  is_vow = (cvk == kindCV_t::cvkVowel),
+                    is_cons = (cvk == kindCV_t::cvkConsonant)
+        ;
+
+        if(!is_vow)
+        {
+            ts.max_vovel_in_row = std::max(ts.max_vovel_in_row, vow_in_row);
+            vow_in_row = 0u;
+        }
+        if(!is_cons)
+        {
+            ts.max_consonant_in_row = std::max(ts.max_consonant_in_row, cons_in_row);
+            cons_in_row = 0u;
+        }
+
+        vow_in_row += is_vow;
+        cons_in_row += is_cons;
+
+        ts.vowel_cnt += is_vow;
+        ts.consonant_cnt += is_cons;
+
+        if(!std::isdigit(src_ch, curr_loc))
+        {
+            ts.is_title_case &= std::isupper(src_ch, curr_loc);
+        }
+
+    }
+    ts.max_consonant_in_row = std::max(ts.max_consonant_in_row, cons_in_row);
+    ts.max_vovel_in_row = std::max(ts.max_vovel_in_row, vow_in_row);   
+    return true; 
+}
+
+str_t ToAlphabet(TAlphabet const & alphabet
+    , wstr_view_t const & src
+    , token_stat_t & ts
+)
 {
     str_t s;
-    ToAlphabet(alphabet, src, s);
+    ToAlphabet(alphabet, src, s, ts);
     return s;
 }
 
-std::wstring FromAlphabet(TAlphabet const & alphabet, std::string_view const & src) 
+std::wstring FromAlphabet(TAlphabet const & alphabet, str_view_t const & src) 
 {
     std::wstring s(src.size(), static_cast<wchar_t> (0) );
     auto tgt = s.begin();

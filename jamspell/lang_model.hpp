@@ -14,8 +14,8 @@
 #include <type_traits>
 
 #include <contrib/handypack/handypack.hpp>
-#include <contrib/tsl/robin_map.h>
 
+#include <contrib/tsl/array-hash/array_map.h>
 #include <contrib/tsl/htrie_map.h>
 
 
@@ -24,11 +24,8 @@ namespace NJamSpell
 
 
 constexpr uint64_t LANG_MODEL_MAGIC_BYTE = 8559322735408079686L;
-constexpr uint16_t LANG_MODEL_VERSION = 1;
+constexpr uint16_t LANG_MODEL_VERSION = 2;
 constexpr double LANG_MODEL_DEFAULT_K = 0.01;
-
-
-
 
 using str_to_id_map_t = tsl::htrie_map<char, wdata_t
     , tsl::ah::str_hash<char>
@@ -89,9 +86,62 @@ public:
     void Load(std::istream& in) 
     {
         deserializer_t ds(in);
-        static_cast<str_to_id_map_t &>(*this) = str_to_id_map_t::deserialize(ds, true);
+        static_cast<str_to_id_map_t &>(*this) 
+            = str_to_id_map_t::deserialize(ds, true);
     }
 };
+
+/////////////////////////////////////////////////////////////////////////////////
+
+class CDict
+{
+    using dict_impl_type = tsl::array_map<char, dict_info_t
+        , tsl::ah::str_hash<char>
+        , tsl::ah::str_equal<char>
+        , false, std::uint8_t
+        , std::uint32_t
+        , tsl::ah::power_of_two_growth_policy<2>
+        >;
+
+public:
+
+    explicit CDict(TAlphabet const & alphbt)
+    : m_dict{}, m_alphabet{alphbt}
+    {}
+
+    std::size_t Load(std::string const & dictFnam);
+
+    dict_info_t Get(str_view_t const & wrd) const
+    {
+        auto const & i = m_dict.find(wrd);
+        return i == m_dict.end() ? dict_info_t::diNone : i.value();
+    }
+
+    template <typename TVisitor>
+    void VisitAll(TVisitor && f) const
+    { VisitImpl(m_dict, std::forward<TVisitor>(f));}
+
+    template <typename TVisitor>
+    void VisitAll(TVisitor && f)
+    { VisitImpl(m_dict, std::forward<TVisitor>(f));}
+
+private:
+
+    template <typename TDict, typename TVisitor>
+    static void VisitImpl(TDict & dict, TVisitor && f)
+    { 
+        for (auto i = dict.begin(), e = dict.end(); i != e; ++i)
+        {
+            std::invoke(std::forward<TVisitor>(f), i);
+        }
+    }
+
+    dict_impl_type  m_dict;
+    TAlphabet       m_alphabet;
+
+};
+
+/////////////////////////////////////////////////////////////////////////////////
 
 class TLangModel 
 {
@@ -116,20 +166,32 @@ public:
 
     using alphabet_type = TTokenizer::alphabet_type;
 
-    bool Train(const std::string& fileName
+    bool Train(const std::string& datasetFIle
+        , const std::string& dictFile
         , const std::string& alphabetFile
         , train_options_t const & tr_opt = train_options_t::ReadFromEnv()
     );
 
-    template <typename TWIt>
-    double Score(TWIt beg, TWIt const & e) const;
+    bool TokenIsBad(str_view_t const & alStr, token_stat_t const & ts) const
+    {
+        return (!ts.is_title_case)
+            && (
+                    (alStr.size() >= 3 && ts.consonant_cnt == alStr.size())
+                ||  (alStr.size() > 3 && ts.vowel_cnt == alStr.size())
+                ||  ts.max_consonant_in_row > 7
+                ||  ts.max_vovel_in_row > 5
+               );
+    }
 
     template <typename TWIt>
-    double Score(boost::iterator_range<TWIt> const &r) const
+    float Score(TWIt beg, TWIt const & e) const;
+
+    template <typename TWIt>
+    float Score(boost::iterator_range<TWIt> const &r) const
     {return Score(r.begin(), r.end());}
 
-    double Score(text_tokens_t & words) const;
-    double Score(std::wstring const & str) const;
+    float Score(text_tokens_t & words) const;
+    float Score(std::wstring const & str) const;
 
     //str_t GetWord( str_view_t const & word) const;
 
@@ -148,11 +210,41 @@ public:
     std::size_t avg_word_length(std::size_t max_probes = 10000u) const;
     std::size_t total_word_occs() const {return TotalWords;}
 
-    TWordId UpdateWordId(str_view_t const & word);
-    TWordId GetWordId(str_view_t const & word) const;
+    
+    TWordId UpdateWordIdIfPresent(str_view_t const & word, cnt_t const c = 1u)
+    {
+        assert(!word.empty());
+        auto i = WordToId.find(word);
+        return (i != WordToId.end()) ? (i.value().cnt += c, i.value().id) 
+            : TWordId::Unknown;
+    }   
 
-    template <typename TWords>
-    void InitWords(text_tokens_t const & orig_txt_tok, TWords & wrds) const;
+    TWordId UpdateWordId(str_view_t const & word, cnt_t const c = 1u)
+    {
+        assert(!word.empty());
+        auto insR = WordToId.emplace(word, wdata_t{TWordId (LastWordID), 0u} );
+        insR.first.value().cnt += c;
+        LastWordID += insR.second;
+        return insR.first.value().id;
+    }
+
+    TWordId UpdateWordId(str_view_t const & word
+        , bool if_present
+        , cnt_t const c = 1u
+    )
+    {
+        return (if_present) ? UpdateWordIdIfPresent(word, c) 
+            : UpdateWordId (word, c);
+    }
+
+    TWordId GetWordId(str_view_t const & word) const
+    {
+        auto it = WordToId.find(word);
+        return (it != WordToId.end()) ? it.value().id : TWordId::Unknown;
+    }
+
+    template <typename TTokens, typename TWords>
+    void InitWords(TTokens & orig_txt_tok, TWords & wrds) const;
 
     template <typename TCntxt>
     void InitContext(TCntxt & cntxt) const;
@@ -172,7 +264,7 @@ public:
               PerfectHash, Buckets, Tokenizer, CheckSum)
 private:
 
-    bool InitWordFromToken(token_info_t const & tinf, word_t & w) const;
+    bool InitWordFromToken(token_info_t & tinf, word_t & w) const;
 
     double CalcGram1Prob(wdata_t const & winf) const
     {
@@ -217,7 +309,7 @@ private:
 ////////////////////////////////////////////////////////////////////////////////
 
 template <typename TWIt>
-double TLangModel::Score(TWIt beg, TWIt const & e) const
+float TLangModel::Score(TWIt beg, TWIt const & e) const
 {
     double result = 0.0;
     static wdata_t const unkn_wi {TWordId::Unknown};
@@ -242,12 +334,12 @@ double TLangModel::Score(TWIt beg, TWIt const & e) const
     return result;
 }
 
-template <typename TWords>
-void TLangModel::InitWords(text_tokens_t const & orig_txt_tok, TWords & wrds) const
+template <typename TTokens, typename TWords>
+void TLangModel::InitWords(TTokens & orig_txt_tok, TWords & wrds) const
 {   
     wrds.resize(orig_txt_tok.size());
     auto wit = wrds.begin();
-    for (token_info_t const & orig_token : orig_txt_tok)
+    for (auto & orig_token : orig_txt_tok)
     {
         wit += InitWordFromToken(orig_token, *wit);
     }
