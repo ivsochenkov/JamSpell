@@ -102,12 +102,12 @@ public:
 
     struct opt_t
     {
-        double      OrigWordIsKnownPenalty      = 30.0   // 20   
+        double      OrigWordIsKnownPenalty      = 18.0   // 20   
                 ,   OrigWordIsUnknownPenalty    = 5.0  // 5    
-                ,   SecondLvlPenFactor          = 50.0       // 50
-                ,   SecondLvlPenalty            = 3.0       
+                ,   SecondLvlPenFactor          = 20.0       // 50
+                ,   SecondLvlPenalty            = 10.0       
                 ,   SwitchedWordPenalty         = 3.0
-                ,   SwitchedWordIsKnownPenalty  = 5.0
+                ,   SwitchedWordIsKnownPenalty  = 15.0
                 ; 
             ;
 

@@ -183,7 +183,7 @@ candidates_t TSpellCorrector::GetCandidates(context_range_t const & context
 
     Score(attrs, context, position, candidates);
     std::sort(candidates.begin(), candidates.end()
-        , [] (cand_word_t const & lhs, cand_word_t const & rhs) 
+        , [] (cand_word_t const & lhs, cand_word_t const & rhs)
             {return lhs.score > rhs.score;}
     );
 

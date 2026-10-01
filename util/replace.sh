@@ -48,13 +48,4 @@ sed -e 's/\bунтерофицер/ унтер-офицер/gI' |
 sed -e 's/\bсеверовосто/ северо-восто/gI' |
 sed -e 's/\bюговосто/ юго-восто/gI' |
 sed -E 's/(\bпрограм)(а|у|ой|ы|е|ист|ир)/ программ\2/gI' 
-sed -e 's/\byt\b/ /gI' |
-sed -e 's/\byb\b/ /gI' |
-sed -e 's/\byj\b/ /gI' |
-sed -e 's/\byf\b/ /gI' |
-sed -e 's/\bgj\b/ /gI' |
-sed -e 's/\bjn\b/ /gI' |
-sed -e 's/\bpf\b/ /gI' |
-sed -e 's/\bnfr\b/ /gI' |
-sed -e "s/\b'nj\b/ /gI"
 
