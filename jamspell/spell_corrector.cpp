@@ -593,7 +593,7 @@ void TSpellCorrector::Edits(str_view_t const& word
     );
 
     del2_vec_t cands = GetDeletes2(word);
-    cands.emplace_back(1, str_t{word});
+    cands.emplace_back(1u, str_t{word});
 
     str_t buf;
     for (auto&& w1: cands) 
@@ -618,60 +618,63 @@ std::size_t TSpellCorrector::Edits2(str_view_t const & word
     , concat_inf_t const & di
 ) const 
 {
-    JS_TRACE_MSG(std::cerr << "[debug] Edits (1-letters) candidates for word: \'" 
+    JS_TRACE_MSG(std::cerr << "[debug] Edits candidates for word: \'" 
         << w_to_u8(
             FromAlphabet(GetLangModel().GetTokenizer().GetAlphabet(), word)
         ) << "\'\n" 
     );
 
-    std::size_t cnt_added {0u};
-
-    str_view_t const & w(word);
+    ::std::size_t cnt_added {0u};
+    ::std::size_t const wsz = word.size();
 
     str_t s;
-    s.reserve(w.size() + 1u);    // one size fits all!
-    for (size_t i = 0; i < w.size() + 1; ++i) 
+    s.reserve(wsz + 1u);    // one size fits all!
+    for (size_t i = 0; i < wsz + 1u; ++i) 
     {
         // delete
-        if (i < w.size()) 
+        if (i < wsz && wsz > 2u) 
         {
-            (s = w.substr(0, i)) += w.substr(i+1);
+            (s = word.substr(0u, i)) += word.substr( i + 1u);
             cnt_added += LookupAndAppend2Candidates(s, candidates, di);
         }
 
         // transpose
-        if (i + 1 < w.size()) 
+        if (i + 1u < wsz) 
         {
-            ((s = w.substr(0, i)) += w[i + 1]) += w[i];
-            if (i + 2 < w.size()) 
+            ((s = word.substr(0, i)) += word[i + 1]) += word[i];
+            if (i + 2u < wsz) 
             {
-                s += w.substr(i+2);
+                s += word.substr( i + 2u);
             }
             cnt_added += LookupAndAppend2Candidates(s, candidates, di);
         }
 
         // replace
-        if (i < w.size()) 
+        if (i < wsz) 
         {
-            TAlphabet::subs_type const & sbt = LangModel.GetAlphabet().GetSubstitutes(w[i]);
+            TAlphabet::subs_type const & sbt = GetAlphabet().GetSubstitutes(word[i]);
             JS_TRACE_MSG(std::cerr << "[debug] substitutes for letter \'"
-                << w_to_u8(std::wstring(1, LangModel.GetAlphabet().Ch2Wch(w[i]))) 
+                << w_to_u8(std::wstring(1u, LangModel.GetAlphabet().Ch2Wch(word[i]))) 
                 << "\': " << w_to_u8(
-                    FromAlphabet(LangModel.GetAlphabet(), str_view_t(sbt.data(), sbt.size()) )) 
+                    FromAlphabet(GetAlphabet(), str_view_t(sbt.data(), sbt.size()) )) 
                 << "\'\n" 
             );
+            s = word;
             for (auto&& ch: sbt) 
             {
-                ((s = w.substr(0, i)) += ch) += w.substr(i+1);
+                //((s = word.substr(0, i)) += ch) += word.substr( i + 1u);
+                s[i] = ch;
                 cnt_added += LookupAndAppend2Candidates(s, candidates, di);
             }
         }
 
         // inserts
         {
+            ((s = word.substr(0, i)) += ' ') += word.substr(i);
             for (auto&& ch: LangModel.GetAlphabet()) 
             {
-                ((s = w.substr(0, i)) += ch) += w.substr(i);
+                //((s = word.substr(0, i)) += ch) += word.substr(i);
+                s[i] = ch;
                 cnt_added += LookupAndAppend2Candidates(s, candidates, di);
             }
         }
