@@ -248,12 +248,8 @@ TSpellCorrector::GetCandidates(const std::vector<std::wstring>& sentence
 }
 */
 
-context_t TSpellCorrector::FixContext(std::wstring const & text) const 
+void TSpellCorrector::FixContext(context_t & cntxt) const
 {
-    wstr_view_t const orig_txt(text);
-    context_t cntxt;
-    LangModel.Text2Words(orig_txt, cntxt);
-
     for (auto orig_it = cntxt.begin(), e = cntxt.end()
         ; orig_it < e 
         ; ++orig_it // see the last line marked with !!!. We omit sent end token
@@ -288,9 +284,15 @@ context_t TSpellCorrector::FixContext(std::wstring const & text) const
         }
         orig_it = curr_sent_ctxt.end();  // !!!
     }
+}
 
+context_t TSpellCorrector::FixContext(std::wstring const & text) const 
+{
+    wstr_view_t const orig_txt(text);
+    context_t cntxt;
+    LangModel.Text2Words(orig_txt, cntxt);
+    FixContext(cntxt);
     return cntxt;
-
 }
 
 
@@ -426,7 +428,7 @@ std::size_t TSpellCorrector::ManageDroppedTokens(cand_word_t const & top_w
             , position, sw.substr(i), cmgr, attrs, ci
         );                
     }
-    while(++i < ci.left);
+    while(++i <= ci.left);
     return added_cnt;
 }
 
@@ -629,10 +631,10 @@ std::size_t TSpellCorrector::Edits2(str_view_t const & word
 
     str_t s;
     s.reserve(wsz + 1u);    // one size fits all!
-    for (size_t i = 0; i < wsz + 1u; ++i) 
+    for (size_t i = 0; i <= wsz; ++i) // !
     {
         // delete
-        if (i < wsz && wsz > 2u) 
+        if (wsz > 2u && i < wsz) 
         {
             (s = word.substr(0u, i)) += word.substr( i + 1u);
             cnt_added += LookupAndAppend2Candidates(s, candidates, di);

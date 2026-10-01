@@ -135,6 +135,7 @@ public:
         , ::std::size_t const position
     ) const;
 
+    void FixContext(context_t & cntxt) const;
     context_t FixContext(std::wstring const & text) const;
 
     std::wstring FixFragment(const std::wstring& text) const;
