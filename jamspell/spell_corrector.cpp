@@ -176,6 +176,42 @@ TSpellCorrector::GetCandidates(const std::vector<std::wstring>& sentence
 }
 */
 
+void TSpellCorrector::DeepFix(context_t & cntxt) const
+{
+    for (auto orig_it = cntxt.begin(), e = cntxt.end()
+        ; orig_it < e 
+        ; ++orig_it // see the last line marked with !!!. We omit sent end token
+                    // and proceed to next sentence begin
+    )
+    {
+        context_range_t const & curr_sent_ctxt = GetNextSent(orig_it, e);
+        std::size_t pos = 0;
+        for ( auto al_word_it = curr_sent_ctxt.begin()
+            ; al_word_it != curr_sent_ctxt.end()
+            ; ++pos, ++al_word_it
+        ) 
+        {
+            cand_word_t const & orig = al_word_it -> orig_word;
+            if (orig.is_none() || !orig.is_word())
+            {
+                continue;
+            }
+
+            FormCandidates(curr_sent_ctxt, pos);
+
+
+
+
+            if (al_word_it -> changed()) 
+            {
+                // Note: ManageDroppedTokens advances al_word_it!
+                pos += ManageDroppedTokens(al_word_it);
+            }
+        }
+        orig_it = curr_sent_ctxt.end();  // !!!
+    }
+}
+
 void TSpellCorrector::Fix(context_t & cntxt) const
 {
     for (auto orig_it = cntxt.begin(), e = cntxt.end()
@@ -266,7 +302,7 @@ context_range_t TSpellCorrector::GetNextSent(context_t::iterator const & b
     return context_range_t{b, i};
 }
 
-void TSpellCorrector::ProcessCandidates(context_range_t const & context
+void TSpellCorrector::FormCandidates(context_range_t const & context
     , ::std::size_t const position
 ) const
 {
@@ -278,14 +314,11 @@ void TSpellCorrector::ProcessCandidates(context_range_t const & context
     {
         return;
     }
+    
+    curr_word.attrs.prev_was_switched = PrevWordWasSwitched(context, position);
+    curr_word.concat = CntNonSpacedNeighbours(context, position);
 
-    attributes_t    attrs;
-    attrs.orig_is_known = !orig_word.unknown();
-    attrs.prev_was_switched = PrevWordWasSwitched(context, position);
-    concat_inf_t cncat_inf = CntNonSpacedNeighbours(context, position);
-    attrs.non_spaced_cnt = cncat_inf.left + cncat_inf.right;
-
-    curr_word.orig_word.score = ScoreOrig(attrs, context, position);
+    curr_word.orig_word.score = LangModel.Score(GetSentenceRange(context, position));
     JS_TRACE_MSG(std::cerr << "[debug] Scored orig: \'" 
         << w_to_u8(FromAlphabet(GetAlphabet(), orig_word.str)) 
         << "\' id = " << static_cast<std::uint32_t> (orig_word.id) 
@@ -298,26 +331,25 @@ void TSpellCorrector::ProcessCandidates(context_range_t const & context
     cndMgr.set_kind (ckFirstLvl);
     ::std::size_t const e2_cnt_added = Edits2(orig_word.str, cndMgr);
 
-    if ((!attrs.orig_is_known) || IsInfreq(orig_word) 
-        || attrs.non_spaced_cnt
-        || attrs.prev_was_switched
-        // LISPanyk would be happy
+    if (    orig_word.unknown() 
+        || IsInfreq(orig_word) 
+        || curr_word.has_non_spaced()
+        || curr_word.attrs.prev_was_switched
     )
     {
-        CheckSwitchedCands(context, position, cndMgr, attrs, cncat_inf);   
+        CheckSwitchedCands(context, position, cndMgr);   
     }
 
-    if((!attrs.sw_orig_is_known) 
-        && (!e2_cnt_added || CandidatesAreInfreq(cndMgr) )
+    if(     orig_word.unknown()
+        &&  (!e2_cnt_added || CandidatesAreInfreq(cndMgr) )
     )
     {
         cndMgr.set_kind (ckSecondLvl);
         Edits(orig_word.str, cndMgr);
     }
 
-    Score(attrs, context, position);
-
 }
+
 
 concat_inf_t TSpellCorrector::CntNonSpacedNeighbours(
       context_range_t const & context
@@ -382,28 +414,27 @@ TSpellCorrector::ManageDroppedTokens(context_t::iterator & al_word_it) const
     return cinf.right;
 }
 
-::std::size_t TSpellCorrector::CheckSwitchedCands (context_range_t const & context
+::std::size_t 
+TSpellCorrector::CheckSwitchedCands (context_range_t const & context
     , ::std::size_t const position
     , TCandMgr & cmgr
-    , attributes_t & attrs
-    , concat_inf_t const & ci
 ) const
 {
-    word_t const & orig = context[position].orig_word;
+    cntxt_word_t & cw = context[position];
     str_t s;
     str_view_t const sw =
-    (ci.left) ? (
-        MakeLeftSwCandsStrPrefix(context, position, ci, s), s += orig.str
-    ) : orig.str;
+    (cw.concat.left) ? (
+        MakeLeftSwCandsStrPrefix(context, position, s), s += cw.orig_word.str
+    ) : cw.orig_word.str;
 
     ::std::size_t i = 0u, added_cnt = 0u;
     do
     {
         added_cnt += FormGreedySwitchedCandsRight(context
-            , position, sw.substr(i), cmgr, attrs, ci
+            , position, sw.substr(i), cmgr
         );                
     }
-    while(++i <= ci.left);
+    while(++i <= cw.concat.left);
     return added_cnt;
 }
 
@@ -412,13 +443,12 @@ TSpellCorrector::ManageDroppedTokens(context_t::iterator & al_word_it) const
     , ::std::size_t const position
     , str_view_t const & sw_cand_str
     , TCandMgr & cmgr
-    , attributes_t & attrs
-    , concat_inf_t const & ci
 ) const
 {       
+    cntxt_word_t & cw = context[position];
     str_t s;
-    str_view_t const sw = (ci.right) ?    
-        (MakeRightSwCandsStr(context, position, ci, (s = sw_cand_str)), s)
+    str_view_t const sw = (cw.concat.right) ?    
+        (MakeRightSwCandsStr(context, position, (s = sw_cand_str)), s)
         : sw_cand_str;
     
     if( (s = PuntoSwitcher(sw)).empty() )
@@ -433,15 +463,17 @@ TSpellCorrector::ManageDroppedTokens(context_t::iterator & al_word_it) const
         //check, if the longest prefix is at least long as context[position].str
         if(w.str.size() >= sw_cand_str.size())
         {
-            concat_inf_t const nci (ci.left, CalcRPos(ci.right, context, position
-                , w.str.size() + context[position - ci.left].token.ofs()
-            ));
+            concat_inf_t const nci (cw.concat.left
+                , CalcRPos(cw.concat.right, context, position
+                    , w.str.size() + context[position - cw.concat.left].token.ofs()
+                  )
+            );
 
-            if(     nci.right == ci.right 
+            if(     nci.right == cw.concat.right 
                 ||  context[position + nci.right + 1].orig_word.is_punct()
             )
             {
-                attrs.sw_orig_is_known = true;
+                cw.attrs.sw_orig_is_known = true;
                 cmgr.set_kind (ckOrigSw);            
                 return Push2Candidates(std::move(w.str), w, cmgr, nci);
             }
@@ -462,22 +494,21 @@ TSpellCorrector::ManageDroppedTokens(context_t::iterator & al_word_it) const
     
     //attrs.sw_orig_is_known = false;
     cmgr.set_kind (ckFirstLvlSw);
-    added_cnt += Edits2(s, cmgr, ci);  // be greedy!
+    added_cnt += Edits2(s, cmgr, cw.concat);  // be greedy!
     return added_cnt;
 }
 
  void TSpellCorrector::MakeLeftSwCandsStrPrefix(
       context_range_t const & context
     , ::std::size_t const position
-    , concat_inf_t const & ci
     , str_t & s
 ) const
 {
     BOOST_ASSERT_MSG(ci.left
         , "Called MakeLeftSwCandsStrPrefix on empty left concatenation context"
     );
-    std::size_t cnt = ci.left;
-    auto i = context.begin() + position - ci.left;
+    std::size_t cnt = context[position].concat.left;
+    auto i = context.begin() + position - cnt;
     do
     {
         s += (i++) -> orig_word.str;
@@ -488,7 +519,6 @@ TSpellCorrector::ManageDroppedTokens(context_t::iterator & al_word_it) const
 void TSpellCorrector::MakeRightSwCandsStr(
       context_range_t const & context
     , ::std::size_t const position
-    , concat_inf_t const & ci
     , str_t & s
 ) const
 {
@@ -496,7 +526,7 @@ void TSpellCorrector::MakeRightSwCandsStr(
         , "Called MakeRightSwCandsStr on empty right concatenation context"
     );
 
-    ::std::size_t cnt = ci.right;
+    ::std::size_t cnt = context[position].concat.right;
     auto it = context.begin() + position + 1u;
     do
     {
@@ -862,17 +892,7 @@ context_crange_t TSpellCorrector::GetSentenceRange(
     return context_crange_t{beg_it, end_it};
 }
 
-float TSpellCorrector::ScoreOrig(attributes_t const & attrs
-    , context_range_t const & orig_sent
-    , std::size_t const pos
-) const
-{
-    float sc = LangModel.Score(GetSentenceRange(orig_sent, pos));
-    return sc;
-}
-
-void TSpellCorrector::Score(attributes_t const & attrs
-    , context_range_t const & context
+void TSpellCorrector::Score(context_range_t const & context
     , std::size_t const pos
 ) const
 {
@@ -881,10 +901,8 @@ void TSpellCorrector::Score(attributes_t const & attrs
     for (::std::size_t i = 0; i < cword.candidates.size(); ++i)
     {
         cand_word_t & cnd = cword.set_best_cand(i);
-        cnd.score = ScoreCandidate(attrs
-            , LangModel.Score(cand_sent.begin(), cand_sent.end())
-            , cnd.kind
-        );
+        cnd.score = LangModel.Score(cand_sent.begin(), cand_sent.end());
+        ScoreCandidate(cword, cnd);
 
         JS_TRACE_MSG(std::cerr << "[debug] Scored candidate: \'" 
             << w_to_u8(
@@ -906,51 +924,53 @@ void TSpellCorrector::Score(attributes_t const & attrs
     );
 }
 
-float TSpellCorrector::ScoreCandidate (attributes_t const & attrs
-    , float sc
-    , cand_kind_t const ck
-) const
+void 
+TSpellCorrector
+::ScoreCandidate (cntxt_word_t const & ctx_word, cand_word_t & cnd) const
 {
-    switch (ck)
+    switch (cnd.kind)
     {
         case ckOrigSw:
         {
-            sc -= (attrs.orig_is_known) ? m_opt.OrigWordIsKnownPenalty 
-                : m_opt.OrigWordIsUnknownPenalty;
-            sc -= (!attrs.prev_was_switched) * m_opt.SwitchedWordPenalty;
+            cnd.score -= (!ctx_word.orig_word.unknown()) ? 
+                    m_opt.OrigWordIsKnownPenalty 
+                :   m_opt.OrigWordIsUnknownPenalty;
+            cnd.score -= (!ctx_word.attrs.prev_was_switched) * m_opt.SwitchedWordPenalty;
             break;
         }
         case ckFirstLvl:
         {
-            sc -= (attrs.orig_is_known) ? m_opt.OrigWordIsKnownPenalty
-                : m_opt.OrigWordIsUnknownPenalty;
+            cnd.score -= (!ctx_word.orig_word.unknown()) ? 
+                    m_opt.OrigWordIsKnownPenalty
+                :   m_opt.OrigWordIsUnknownPenalty;
             break;
         }               
         case ckSecondLvl:
         {
-            sc = (attrs.orig_is_known) ? 
-                (sc * m_opt.SecondLvlPenFactor) 
-            :   (sc - m_opt.OrigWordIsUnknownPenalty - m_opt.SecondLvlPenalty);
+            cnd.score = (!ctx_word.orig_word.unknown()) ? 
+                (cnd.score * m_opt.SecondLvlPenFactor) 
+            :   (cnd.score - m_opt.OrigWordIsUnknownPenalty - m_opt.SecondLvlPenalty);
             break;
         }
 
         case ckFirstLvlSw:
         {
-            sc -= (attrs.orig_is_known) ? m_opt.OrigWordIsKnownPenalty 
-                : m_opt.OrigWordIsUnknownPenalty;
-            sc -= ((!attrs.prev_was_switched) * m_opt.SwitchedWordPenalty 
-                    + attrs.sw_orig_is_known * m_opt.SwitchedWordIsKnownPenalty
+            cnd.score -= (!ctx_word.orig_word.unknown()) ? 
+                    m_opt.OrigWordIsKnownPenalty 
+                :   m_opt.OrigWordIsUnknownPenalty;
+            cnd.score -= ((!ctx_word.attrs.prev_was_switched) * m_opt.SwitchedWordPenalty 
+                    + ctx_word.attrs.sw_orig_is_known * m_opt.SwitchedWordIsKnownPenalty
                 );
             break;
         }
 
         case ckSecondLvlSw:
         {
-            sc = (attrs.orig_is_known) ? 
-                (sc * m_opt.SecondLvlPenFactor) 
-            :   (sc - m_opt.OrigWordIsUnknownPenalty - m_opt.SecondLvlPenalty);
-            sc -= ((!attrs.prev_was_switched) * m_opt.SwitchedWordPenalty 
-                    + attrs.sw_orig_is_known * m_opt.SwitchedWordIsKnownPenalty
+            cnd.score = (!ctx_word.orig_word.unknown()) ? 
+                (cnd.score * m_opt.SecondLvlPenFactor) 
+            :   (cnd.score - m_opt.OrigWordIsUnknownPenalty - m_opt.SecondLvlPenalty);
+            cnd.score -= ((!ctx_word.attrs.prev_was_switched) * m_opt.SwitchedWordPenalty 
+                    + ctx_word.attrs.sw_orig_is_known * m_opt.SwitchedWordIsKnownPenalty
                 );
             break;
         }
@@ -959,7 +979,6 @@ float TSpellCorrector::ScoreCandidate (attributes_t const & attrs
             break;
         }
     }
-    return sc; 
 }
 
 

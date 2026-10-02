@@ -27,7 +27,7 @@ public:
     explicit TCandMgr (candidates_t & cands, std::size_t const maxCandCnt = 64u)
     : m_impl{cands}, m_max_sz{maxCandCnt}, m_best_cnt {0u}, m_cand_kind{ckFirstLvl}
     {
-        m_impl.reserve(maxCandCnt + 2u);
+        m_impl.reserve(maxCandCnt);
     }
 
     void set_kind (cand_kind_t const ck) { m_cand_kind = ck;}
@@ -86,17 +86,6 @@ private:
 
 class TSpellCorrector 
 {
-private:
-
-    struct attributes_t
-    {
-        ::std::uint8_t      non_spaced_cnt      = 0;
-        bool                orig_is_known       = false
-                        ,   sw_orig_is_known    = false
-                        ,   prev_was_switched   = false
-                        ;
-
-    };
 
 public:
 
@@ -131,6 +120,8 @@ public:
         , TLangModel::train_options_t const & tr_opt 
             = TLangModel::train_options_t::ReadFromEnv()
     );
+
+    void DeepFix(context_t & cntxt) const;
 
     void Fix(context_t & cntxt) const;
     context_t Fix(std::wstring const & text) const;
@@ -171,9 +162,17 @@ private:
         , context_t::iterator const & e
     );
 
-    void ProcessCandidates(context_range_t const & context
+    void FormCandidates(context_range_t const & context
         , ::std::size_t const position
     ) const;
+
+    void ProcessCandidates(context_range_t const & context
+        , ::std::size_t const position
+    ) const
+    { 
+        FormCandidates(context, position);
+        Score(context, position);
+    }
 
     concat_inf_t CntNonSpacedNeighbours(context_range_t const & context
         , ::std::size_t const position
@@ -188,8 +187,6 @@ private:
     ::std::size_t CheckSwitchedCands (context_range_t const & context
         , ::std::size_t const position
         , TCandMgr & cmgr
-        , attributes_t & attrs
-        , concat_inf_t const & ci
     ) const;
 
     ::std::size_t FormGreedySwitchedCandsRight (
@@ -197,19 +194,15 @@ private:
         , ::std::size_t const position
         , str_view_t const & sw_cand_str
         , TCandMgr & cmgr       
-        , attributes_t & attrs 
-        , concat_inf_t const & ci
     ) const;
 
     void MakeLeftSwCandsStrPrefix(context_range_t const & context
         , ::std::size_t const position
-        , concat_inf_t const & ci
         , str_t & s
     ) const;
 
     void MakeRightSwCandsStr(context_range_t const & context
         , ::std::size_t const position
-        , concat_inf_t const & ci
         , str_t & s
     ) const;
 
@@ -287,20 +280,9 @@ private:
         , std::size_t const pos
     ) const;
 
-    float ScoreOrig(attributes_t const & attrs
-        , context_range_t const & orig_sent
-        , std::size_t const pos
-    ) const;
+    void Score(context_range_t const & context, std::size_t const pos) const;
 
-    void Score(attributes_t const & attrs
-        , context_range_t const & context
-        , std::size_t const pos
-    ) const;
-
-    float ScoreCandidate (attributes_t const & attrs
-        , float sc
-        , cand_kind_t const ck
-    ) const;
+    void ScoreCandidate (cntxt_word_t const & ctx_word, cand_word_t & cnd) const;
 
     TLangModel                      LangModel;
     std::unique_ptr<TBloomFilter>   Deletes1;

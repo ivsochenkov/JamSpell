@@ -311,6 +311,13 @@ using candidates_crange_t = boost::iterator_range<candidates_t::const_iterator>;
 
 ////////////////////////////////////////////////////////////////////////////////
 
+struct cntxt_attr_t
+{
+    bool                sw_orig_is_known    = false
+                    ,   prev_was_switched   = false
+                    ;
+};
+
 struct cntxt_word_t
 {
     using cand_ref_t = std::reference_wrapper<cand_word_t>;
@@ -318,7 +325,12 @@ struct cntxt_word_t
     cntxt_word_t() = default;
 
     explicit cntxt_word_t(token_info_t const & tinf)
-    : candidates{}, best_cand{orig_word}, orig_word{}, token{tinf}
+    : candidates{}
+    , best_cand{orig_word}
+    , orig_word{}
+    , token{tinf}
+    , attrs{}
+    , concat{}
     {}
 
     cand_word_t & set_best_cand (std::size_t const i)
@@ -339,10 +351,14 @@ struct cntxt_word_t
 
     bool changed() const noexcept {return get_best_cand().kind != orig_word.kind;}
 
+    bool has_non_spaced() const noexcept {return concat.left || concat.right;}
+
     candidates_t        candidates;
     cand_ref_t          best_cand;
     cand_word_t         orig_word;
     token_info_t        token;    
+    cntxt_attr_t        attrs;
+    concat_inf_t        concat;
     
 };
 

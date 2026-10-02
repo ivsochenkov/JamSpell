@@ -353,6 +353,7 @@ void TLangModel::InitContext(TCntxt & cntxt) const
     auto wit = cntxt.begin();
     for (cntxt_word_t & cw : cntxt)
     {
+        // LISPanyk would be happy
         SetKind(*wit, cand_kind_t(InitWordFromToken(cw.token, Word(*wit))));
         ++wit;
     }
