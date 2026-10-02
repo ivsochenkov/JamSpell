@@ -13,65 +13,40 @@ std::string GetCandidates(const NJamSpell::TSpellCorrector& corrector
     //corrector.GetLangModel().GetTokenizer().FilterHyphen(input);
     
     wstr_view_t const orig_txt(input);
-    context_t cntxt = corrector.FixContext(input);
+    context_t cntxt = corrector.Fix(input);
 
     nlohmann::json results;
     results["results"] = nlohmann::json::array();
-
     size_t origPos = 0;
-    for (auto orig_it = cntxt.begin(), e = cntxt.end()
-        ; orig_it < e 
-        ; ++orig_it // see the last line marked with !!!. We omit sent end token
-                    // and proceed to next sentence begin
+    for (auto cit = cntxt.begin(), e = cntxt.end()
+        ; cit < e 
+        ; ++cit 
     )
     {
-        context_range_t curr_sent_ctxt = TSpellCorrector::GetNextSent(orig_it, e);
-
-        std::size_t j = 0;
-        for ( auto al_word_it = curr_sent_ctxt.begin()
-            ; al_word_it != curr_sent_ctxt.end()
-            ; ++j, ++al_word_it
-        ) 
+        if(cit -> orig_word.omitted() || cit -> candidates.empty())
         {
-            if (al_word_it -> is_none() || !al_word_it -> is_word())
-            {
-                continue;
-            }
-
-            cntxt_word_t & curr_word = *al_word_it;
-            candidates_t candidates {corrector.GetCandidates(curr_sent_ctxt, j)};
-            if (!candidates.empty()) 
-            {
-                cand_word_t & top_w = candidates.front();
-                if(curr_word.score >= top_w.score || curr_word.id == top_w.id)
-                {
-                    continue;
-                }
-            }
-           
-            nlohmann::json currentResult;
-            
-            token_info_t const & orig_token = al_word_it -> token;
-            currentResult["pos_from"] = orig_token.ofs();
-            currentResult["len"] = orig_token.size();
-            currentResult["candidates"] = nlohmann::json::array();
-
-            std::size_t const candidatesSize = std::min(candidates.size(), std::size_t(7));
-            for (std::size_t k = 0; k < candidatesSize; ++k) 
-            {
-                currentResult["candidates"].emplace_back(w_to_u8(
-                    FromAlphabet(corrector.GetLangModel().GetTokenizer().GetAlphabet()
-                        , candidates[k].str
-                    )
-                ));
-            }
-
-            results["results"].push_back(currentResult);
+            continue;
         }
-        orig_it = curr_sent_ctxt.end();  // !!!
 
+        cntxt_word_t & curr_word = *cit;
+        nlohmann::json currentResult;
+        token_info_t const & orig_token = curr_word.token;
+        currentResult["pos_from"] = orig_token.ofs();
+        currentResult["len"] = orig_token.size();
+        currentResult["score"] = curr_word.orig_word.score;
+        auto & cnds = (currentResult["candidates"] = nlohmann::json::array());
+        for (cand_word_t const & cand_w : curr_word.candidates) 
+        {
+            nlohmann::json cnddt;
+            std::size_t const pos_from = (cit - cand_w.concat.left) -> token.ofs();
+            cnddt["pos_from"] = pos_from;
+            auto const rtok = (cit + cand_w.concat.right) -> token;
+            cnddt["len"] = rtok.ofs() + rtok.size() - pos_from;
+            cnddt["score"] = cand_w.score;
+            cnddt["str"] = corrector.ToU8(cand_w.str);
+            cnds.emplace_back(cnddt);
+        }
     }
-
     return results.dump(4);
 }
 

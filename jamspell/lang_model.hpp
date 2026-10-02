@@ -318,12 +318,13 @@ float TLangModel::Score(TWIt beg, TWIt const & e) const
 
     do 
     {
-        result += std::log2(CalcGram1Prob(*beg));
-        wdata_t const & rN1 = (next1 < e) ? *next1: unkn_wi;
-        result += std::log2(CalcGram2Prob(*beg, rN1 ));
-        wdata_t const & rN2 = (next2 < e) ? *next2: unkn_wi;
-        result += std::log2(CalcGram3Prob(*beg, rN1, rN2));
-        result += std::log2(Calc1StepGram2Prob(*beg, rN2));
+        wdata_t const & wd = WordData(*beg);
+        result += std::log2(CalcGram1Prob(wd));
+        wdata_t const & rN1 = (next1 < e) ? WordData(*next1): unkn_wi;
+        result += std::log2(CalcGram2Prob(wd, rN1 ));
+        wdata_t const & rN2 = (next2 < e) ? WordData(*next2): unkn_wi;
+        result += std::log2(CalcGram3Prob(wd, rN1, rN2));
+        result += std::log2(Calc1StepGram2Prob(wd, rN2));
   
         beg = next1;
         next1 = next2;
@@ -341,7 +342,7 @@ void TLangModel::InitWords(TTokens & orig_txt_tok, TWords & wrds) const
     auto wit = wrds.begin();
     for (auto & orig_token : orig_txt_tok)
     {
-        wit += InitWordFromToken(orig_token, *wit);
+        wit += InitWordFromToken(orig_token, Word(*wit));
     }
     wrds.resize(std::distance(wrds.begin(), wit));
 }
@@ -352,7 +353,7 @@ void TLangModel::InitContext(TCntxt & cntxt) const
     auto wit = cntxt.begin();
     for (cntxt_word_t & cw : cntxt)
     {
-        wit -> kind = cand_kind_t(InitWordFromToken(cw.token, *wit));
+        SetKind(*wit, cand_kind_t(InitWordFromToken(cw.token, Word(*wit))));
         ++wit;
     }
 }

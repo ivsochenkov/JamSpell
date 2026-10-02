@@ -43,6 +43,15 @@ kindCV_t GetCVKind(wchar_t const c)
     return kindCV_t::cvkUndefined;
 }
 
+void FinalizeCandidates(cntxt_word_t & cw) noexcept
+{
+    std::sort(cw.candidates.begin(), cw.candidates.end()
+        , [] (cand_word_t const & lhs, cand_word_t const & rhs)
+            {return lhs.score > rhs.score;}
+    );
+    cw.reset_best_cand();
+}
+
 uint64_t GetCurrentTimeMs() {
     using namespace std::chrono;
     milliseconds ms = duration_cast<milliseconds>(system_clock::now().time_since_epoch());

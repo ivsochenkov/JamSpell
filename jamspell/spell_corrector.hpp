@@ -118,6 +118,7 @@ public:
         static opt_t ReadFromEnv();
     };
 
+    using scored_candidates_t = std::vector<candidates_t>;
 
     explicit TSpellCorrector (opt_t const & opt = opt_t::ReadFromEnv());
 
@@ -131,20 +132,21 @@ public:
             = TLangModel::train_options_t::ReadFromEnv()
     );
 
-    candidates_t GetCandidates(context_range_t const & context
-        , ::std::size_t const position
-    ) const;
-
-    void FixContext(context_t & cntxt) const;
-    context_t FixContext(std::wstring const & text) const;
+    void Fix(context_t & cntxt) const;
+    context_t Fix(std::wstring const & text) const;
 
     std::wstring FixFragment(const std::wstring& text) const;
     
     NJamSpell::TLangModel const & GetLangModel() const {return LangModel;}
 
-    static context_range_t GetNextSent(context_t::iterator const & b
-        , context_t::iterator const & e
-    );
+    std::string ToU8 (str_view_t const & s) const
+    {
+        return w_to_u8(ToU32(s));
+    }
+    std::wstring ToU32 (str_view_t const & s) const
+    {
+        return FromAlphabet(GetAlphabet(), s);
+    }
 
 private:
 
@@ -165,6 +167,14 @@ private:
     TAlphabet const & GetAlphabet() const noexcept
     { return GetLangModel().GetTokenizer().GetAlphabet(); }
 
+    static context_range_t GetNextSent(context_t::iterator const & b
+        , context_t::iterator const & e
+    );
+
+    void ProcessCandidates(context_range_t const & context
+        , ::std::size_t const position
+    ) const;
+
     concat_inf_t CntNonSpacedNeighbours(context_range_t const & context
         , ::std::size_t const position
     ) const;
@@ -173,9 +183,7 @@ private:
         , ::std::size_t const position
     ) const;
 
-    std::size_t  ManageDroppedTokens(cand_word_t const & top_w
-        , context_t::iterator & al_word_it
-    ) const;
+    std::size_t  ManageDroppedTokens(context_t::iterator & al_word_it) const;
 
     ::std::size_t CheckSwitchedCands (context_range_t const & context
         , ::std::size_t const position
@@ -287,7 +295,6 @@ private:
     void Score(attributes_t const & attrs
         , context_range_t const & context
         , std::size_t const pos
-        , candidates_t & candidates
     ) const;
 
     float ScoreCandidate (attributes_t const & attrs

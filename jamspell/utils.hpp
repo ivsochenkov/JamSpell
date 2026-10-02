@@ -170,6 +170,11 @@ struct wdata_t
     HANDYPACK(id, cnt)
 };
 
+inline wdata_t const & WordData(wdata_t const & wd) noexcept {return wd;}
+inline bool IsWord(wdata_t const & wd) noexcept {return wd.is_word();}
+
+////////////////////////////////////////////////////////////////////////////////
+
 struct word_t: public wdata_t
 {
     using str_type =        str_t;
@@ -205,14 +210,24 @@ struct word_t: public wdata_t
 
 };
 
+////////////////////////////////////////////////////////////////////////////////
+
+inline word_t & Word(word_t & w) noexcept {return w;}
+
+////////////////////////////////////////////////////////////////////////////////
+
 using words_t = std::vector<word_t>;    // orig_word_t
 using words_crange_t = boost::iterator_range<words_t::const_iterator>;
+
+////////////////////////////////////////////////////////////////////////////////
 
 struct orig_word_greater_by_cnt_t
 {
     bool operator () (word_t const & w1, word_t const & w2) const
     { return w1.cnt > w2.cnt;}
 };
+
+////////////////////////////////////////////////////////////////////////////////
 
 enum cand_kind_t : unsigned char
 {
@@ -233,49 +248,31 @@ inline cand_kind_t NextLevel(cand_kind_t const ck)
 template <typename TWIt>
 TWIt Advance2Next(TWIt beg, TWIt const & e)
 {
-    while(++beg < e && !(beg -> is_word()))
+    while(++beg < e && (!IsWord(*beg)))
     {}    
     return beg;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 
-struct basic_cand_word_t: public word_t
-{
-    float           score;  
-    cand_kind_t     kind    = ckNone;
-
-    basic_cand_word_t () = default;
-    
-    template <typename TStr>
-    basic_cand_word_t (word_id_t const i, TStr && s, cnt_t const c, cand_kind_t const ck)
-    : word_t{i, std::forward<TStr>(s), c}, kind{ck} 
-    {}
-
-    bool is_orig() const noexcept { return ckOrig == kind;}
-    bool is_none() const noexcept { return ckNone == kind;}
-
-    bool omitted() const noexcept { return is_orig() || is_none() || is_punct();}
-
-    bool was_switched() const noexcept 
-    { return kind == ckOrigSw || kind == ckFirstLvlSw || kind == ckSecondLvlSw;}
-
-};
-
 struct concat_inf_t
 {
-    ::std::uint32_t     left = 0u, right = 0u;
-
     concat_inf_t() = default;
 
-    concat_inf_t(::std::uint32_t const l, ::std::uint32_t const r)
+    concat_inf_t(::std::uint8_t const l, ::std::uint8_t const r)
     : left{l}, right{r}
     {}
+
+    ::std::uint8_t          left = 0u, right = 0u;
 };
 
-struct cand_word_t: public basic_cand_word_t
-{    
-    concat_inf_t     drop;
+////////////////////////////////////////////////////////////////////////////////
+
+struct cand_word_t: public word_t
+{
+    float           score;
+    concat_inf_t    concat;
+    cand_kind_t     kind    = ckNone;
 
     cand_word_t () = default;
     
@@ -284,13 +281,29 @@ struct cand_word_t: public basic_cand_word_t
         , TStr && s
         , cnt_t const c
         , cand_kind_t const ck
-        , concat_inf_t const & dr
+        , concat_inf_t const ci
     )
-    : basic_cand_word_t {i, std::forward<TStr>(s), c , ck}
-    , drop{dr}
+    : word_t{i, std::forward<TStr>(s), c}, kind{ck}, concat{ci}
     {}
 
+    bool is_orig() const noexcept { return ckOrig == kind;}
+    bool is_none() const noexcept { return ckNone == kind;}
+
+    bool omitted() const noexcept { return is_none() || is_punct();}
+
+    bool was_switched() const noexcept 
+    { return kind == ckOrigSw || kind == ckFirstLvlSw || kind == ckSecondLvlSw;}
+
 };
+
+////////////////////////////////////////////////////////////////////////////////
+
+inline void SetKind(cand_word_t & cw, cand_kind_t const ck) noexcept 
+{
+    cw.kind = ck;
+}
+
+////////////////////////////////////////////////////////////////////////////////
 
 using candidates_t = std::vector<cand_word_t>;
 using candidates_range_t = boost::iterator_range<candidates_t::iterator>;
@@ -298,21 +311,66 @@ using candidates_crange_t = boost::iterator_range<candidates_t::const_iterator>;
 
 ////////////////////////////////////////////////////////////////////////////////
 
-struct cntxt_word_t: public basic_cand_word_t
+struct cntxt_word_t
 {
+    using cand_ref_t = std::reference_wrapper<cand_word_t>;
+
     cntxt_word_t() = default;
 
     explicit cntxt_word_t(token_info_t const & tinf)
-    : basic_cand_word_t{}, token{tinf} 
+    : candidates{}, best_cand{orig_word}, orig_word{}, token{tinf}
     {}
 
-    void assign (cand_word_t && cnd)
+    cand_word_t & set_best_cand (std::size_t const i)
     {
-        static_cast<basic_cand_word_t &>(*this) = std::move(cnd);
+        return (best_cand = std::ref(candidates[i]));
     }
 
-    token_info_t        token;
+    void reset_best_cand () noexcept
+    {                   
+        best_cand = std::ref( 
+            ((!candidates.empty()) && (candidates.front().score > orig_word.score)) 
+            ? candidates.front() : orig_word
+        );
+    }
+
+    cand_word_t const & get_best_cand() const noexcept {return best_cand;}
+    cand_word_t & get_best_cand() noexcept {return best_cand;}
+
+    bool changed() const noexcept {return get_best_cand().kind != orig_word.kind;}
+
+    candidates_t        candidates;
+    cand_ref_t          best_cand;
+    cand_word_t         orig_word;
+    token_info_t        token;    
+    
 };
+
+////////////////////////////////////////////////////////////////////////////////
+
+inline void SetKind(cntxt_word_t & cw, cand_kind_t const ck) noexcept 
+{
+    cw.orig_word.kind = ck;
+}
+
+inline wdata_t const & WordData(cntxt_word_t const & cw) noexcept 
+{
+    return cw.best_cand;
+}
+
+inline word_t & Word(cntxt_word_t & cw) noexcept 
+{
+    return cw.orig_word;
+}
+
+inline bool IsWord(cntxt_word_t const & cw) noexcept 
+{
+    return cw.orig_word.is_word();
+}
+
+void FinalizeCandidates(cntxt_word_t & cw) noexcept;
+
+////////////////////////////////////////////////////////////////////////////////
 
 using context_t = std::vector<cntxt_word_t>;
 using context_range_t = boost::iterator_range<context_t::iterator>;
