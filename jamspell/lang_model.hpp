@@ -145,10 +145,102 @@ private:
 
 class TLangModel 
 {
-    struct TGramLoader ;
-    class TGramKey;
+    class TGramKey 
+    {
+        using storage_type = std::array<TWordId, 3>;
+
+      public:
+
+        enum class ngram_type : unsigned char 
+        {            
+                nUndef      = 0    
+            ,   nGram1
+            ,   nGram2
+            ,   nGram3
+        };
+
+        explicit TGramKey (TWordId const & n1 = TWordId::Unknown
+            , TWordId const & n2 = TWordId::Unknown
+            , TWordId const & n3 = TWordId::Unknown
+        ) 
+        : m_elems{n1, n2, n3} 
+        {}
+
+        bool operator < (TGramKey const & rhs) const 
+        { return m_elems < rhs.m_elems; }
+
+        bool operator == (TGramKey const & rhs) const 
+        { return m_elems == rhs.m_elems; }
+
+        TWordId operator [] (unsigned i) const {return m_elems[i];}
+        TWordId & operator [] (unsigned i) {return m_elems[i];}
+
+        std::string_view bytes() const 
+        {
+            return std::string_view(reinterpret_cast<const char*>(m_elems.data())
+                ,  to_underlying(kind()) * sizeof(m_elems[0])
+            );
+        }
+
+        inline ngram_type kind() const
+        {
+            short nt = to_underlying(ngram_type::nUndef);
+            for(auto i = m_elems.begin(); i != m_elems.end(); nt += (*i++ != TWordId::Unknown))
+            {}
+            return ngram_type(nt);
+        }
+
+        using const_iterator = storage_type::const_iterator;
+
+        const_iterator begin () const {return m_elems.begin();}
+        const_iterator end () const { return begin() + to_underlying(kind()); }
+
+        static std::underlying_type<ngram_type>::type to_underlying(ngram_type nt)
+        {
+            return static_cast<std::underlying_type<TGramKey::ngram_type>::type> (nt);
+        }
+
+      private:
+
+        static void inc(TGramKey::ngram_type & nt, bool v) 
+        {
+            nt = TGramKey::ngram_type( to_underlying(nt) + v );
+        }
+
+        storage_type    m_elems;
+
+    };
+
+    struct TGramLoader ;    
 
     using buckets_type = std::vector<std::pair<::std::uint16_t, ::std::uint16_t>> ;
+
+    static constexpr double MAX_REAL_NUM = 268435456;
+    static constexpr double MAX_AVAILABLE_NUM = 65536;
+    
+    static ::std::uint16_t PackInt32(uint32_t num) 
+    {
+        double r = double(num) / MAX_REAL_NUM;
+        assert(r >= 0.0 && r <= 1.0);
+        r = pow(r, 0.2);
+        r *= MAX_AVAILABLE_NUM;
+        return uint16_t(r);
+    }
+
+    static ::std::uint32_t UnpackInt32(uint16_t num) 
+    {
+        double r = double(num) / MAX_AVAILABLE_NUM;
+        //r = pow(r, 5.0);
+        r = r * r * r * r * r;
+        r *= MAX_REAL_NUM;
+        return uint32_t(::std::ceil(r));
+    }
+
+    template<typename T>
+    static void InitializeBuckets(const T& grams
+        , TPerfectHash& ph
+        , buckets_type& buckets
+    );
 
 public:
 
@@ -176,7 +268,7 @@ public:
     {
         return (!ts.is_title_case)
             && (
-                    (alStr.size() >= 3 && ts.consonant_cnt == alStr.size())
+                    (alStr.size() >= 2 && ts.consonant_cnt == alStr.size())
                 ||  (alStr.size() > 3 && ts.vowel_cnt == alStr.size())
                 ||  ts.max_consonant_in_row > 7
                 ||  ts.max_vovel_in_row > 5
@@ -259,12 +351,10 @@ public:
     dict_const_iterator dict_begin() const {return WordToId.begin();}
     dict_const_iterator dict_end() const {return WordToId.end();}
 
-
-    HANDYPACK(WordToId, LastWordID, TotalWords, VocabSize,
-              PerfectHash, Buckets, Tokenizer, CheckSum)
-private:
-
-    bool InitWordFromToken(token_info_t & tinf, word_t & w) const;
+    double ExpectedProb(double const wlen) const
+    {        
+        return 0.1 * ::std::exp(-wlen);
+    }
 
     double CalcGram1Prob(wdata_t const & winf) const
     {
@@ -288,7 +378,20 @@ private:
     TCount GetGramHashCount(TGramKey const & key
         , TPerfectHash const & ph
         , buckets_type const & buckets
-    ) const;
+    ) const
+    {
+        uint32_t const bucket = ph.Hash(key.bytes());
+        assert(bucket < ph.BucketsNumber());
+        const std::pair<uint16_t, uint16_t>& data = buckets[bucket];
+        return (data.first == CityHash16(key.bytes())) ? UnpackInt32(data.second) : 0u;
+    }
+
+
+    HANDYPACK(WordToId, LastWordID, TotalWords, VocabSize,
+              PerfectHash, Buckets, Tokenizer, CheckSum)
+private:
+
+    bool InitWordFromToken(token_info_t & tinf, word_t & w) const;
 
     
     //const TWordId UnknownWordId = std::numeric_limits<TWordId>::max();
@@ -307,6 +410,27 @@ private:
 };
 
 ////////////////////////////////////////////////////////////////////////////////
+
+template<typename T>
+void TLangModel::InitializeBuckets(const T& grams
+    , TPerfectHash& ph
+    , buckets_type& buckets
+) 
+{
+    for (auto&& it: grams) 
+    {
+        std::uint32_t const bucket = ph.Hash(it.first.bytes());
+        if (bucket >= buckets.size()) 
+        {
+            std::cerr << bucket << " " << buckets.size() << "\n";
+        }
+        assert(bucket < buckets.size());
+        std::pair<uint16_t, uint16_t> data;
+        data.first = CityHash16(it.first.bytes());
+        data.second = PackInt32(it.second);
+        buckets[bucket] = data;
+    }
+}
 
 template <typename TWIt>
 float TLangModel::Score(TWIt beg, TWIt const & e) const

@@ -52,12 +52,18 @@ using str_view_t = std::string_view;
 //using str_t = std::string;
 using str_t = boost::container::string;
 
+////////////////////////////////////////////////////////////////////////////////
+
 enum class kindCV_t : unsigned char
 {
     cvkUndefined = 0,
     cvkVowel,
     cvkConsonant
 };
+
+kindCV_t GetCVKind(wchar_t const c);
+
+////////////////////////////////////////////////////////////////////////////////
 
 struct token_stat_t
 {
@@ -338,12 +344,12 @@ struct cntxt_word_t
         return (best_cand = std::ref(candidates[i]));
     }
 
-    void reset_best_cand () noexcept
-    {                   
-        best_cand = std::ref( 
-            ((!candidates.empty()) && (candidates.front().score > orig_word.score)) 
-            ? candidates.front() : orig_word
-        );
+    bool reset_best_cand () noexcept
+    {
+        bool const chngd = (!candidates.empty()) 
+            && (candidates.front().score > orig_word.score);
+        best_cand = std::ref( chngd ? candidates.front() : orig_word );
+        return chngd;
     }
 
     cand_word_t const & get_best_cand() const noexcept {return best_cand;}
@@ -384,7 +390,7 @@ inline bool IsWord(cntxt_word_t const & cw) noexcept
     return cw.orig_word.is_word();
 }
 
-void FinalizeCandidates(cntxt_word_t & cw) noexcept;
+void SortCandidates(cntxt_word_t & cw) noexcept;
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -402,8 +408,6 @@ enum class dict_info_t : unsigned char
 };
 
 ////////////////////////////////////////////////////////////////////////////////
-
-kindCV_t GetCVKind(wchar_t const c);
 
 template <typename TWrds>
 void ReserveWords(TWrds & wrds, wstr_view_t const & txt)

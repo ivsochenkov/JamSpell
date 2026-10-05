@@ -128,6 +128,8 @@ public:
 
     letter_type GetSwitched(char const ch) const;
 
+    token_stat_t CalcTokenStat(str_view_t const & s) const;
+
 private:
 
     using impl_type = std::vector<letter_info_t>;

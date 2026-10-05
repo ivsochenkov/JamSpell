@@ -81,73 +81,6 @@ TLangModel::train_options_t TLangModel::train_options_t::ReadFromEnv()
     return opt;
 }
 
-class TLangModel::TGramKey 
-{
-    using storage_type = std::array<TWordId, 3>;
-
-public:
-
-    enum class ngram_type : unsigned char 
-    {            
-            nUndef      = 0    
-        ,   nGram1
-        ,   nGram2
-        ,   nGram3
-    };
-
-    explicit TGramKey (TWordId const & n1 = TWordId::Unknown
-        , TWordId const & n2 = TWordId::Unknown
-        , TWordId const & n3 = TWordId::Unknown
-    ) 
-    : m_elems{n1, n2, n3} 
-    {}
-
-    bool operator < (TGramKey const & rhs) const 
-    { return m_elems < rhs.m_elems; }
-
-    bool operator == (TGramKey const & rhs) const 
-    { return m_elems == rhs.m_elems; }
-
-    TWordId operator [] (unsigned i) const {return m_elems[i];}
-    TWordId & operator [] (unsigned i) {return m_elems[i];}
-
-    std::string_view bytes() const 
-    {
-        return std::string_view(reinterpret_cast<const char*>(m_elems.data())
-            ,  to_underlying(kind()) * sizeof(m_elems[0])
-        );
-    }
-
-    inline ngram_type kind() const
-    {
-        short nt = to_underlying(ngram_type::nUndef);
-        for(auto i = m_elems.begin(); i != m_elems.end(); nt += (*i++ != TWordId::Unknown))
-        {}
-        return ngram_type(nt);
-    }
-
-    using const_iterator = storage_type::const_iterator;
-
-    const_iterator begin () const {return m_elems.begin();}
-    const_iterator end () const { return begin() + to_underlying(kind()); }
-
-    static std::underlying_type<ngram_type>::type to_underlying(ngram_type nt)
-    {
-        return static_cast<std::underlying_type<TGramKey::ngram_type>::type> (nt);
-    }
-
-private:
-
-    static void inc(TGramKey::ngram_type & nt, bool v) 
-    {
-        nt = TGramKey::ngram_type( to_underlying(nt) + v );
-    }
-
-    storage_type    m_elems;
-
-};
-
-
 struct TLangModel::TGramLoader 
 {
     
@@ -209,7 +142,7 @@ private:
         return LM.Tokenizer.GetAlphabet();
     }
 
-    bool TokenIsBad(str_view_t const & alStr, token_stat_t const & ts) const
+    bool IsBad(str_view_t const & alStr, token_stat_t const & ts) const
     {
         dict_info_t const di = m_dict.Get(alStr);
         return (di == dict_info_t::diExcluded) 
@@ -372,7 +305,7 @@ void TLangModel::TGramLoader::FillGramms(text_tokens_iterator_t b
                 continue;
             }
 
-            if( TokenIsBad(alStr, b -> stat()) )
+            if( IsBad(alStr, b -> stat()) )
             {                
                 if (TWordId::Unknown == (gram_key[c] = LM.UpdateWordIdIfPresent(alStr)))
                 {
@@ -487,61 +420,6 @@ void TLangModel::TGramLoader::CleanupVocabulary()
 
     std::cerr << "++[info] done cleanup vocabulary... size = " 
         << LM.WordToId.size() << std::endl;
-}
-
-
-static const uint32_t MAX_REAL_NUM = 268435456;
-static const uint32_t MAX_AVAILABLE_NUM = 65536;
-
-inline void AssignWordInfo(word_t & tgt, wdata_t const & src)
-{
-    tgt.cnt = src.cnt;
-    tgt.id = src.id;
-    // do not empty tgt.str !!!
-}
-
-inline void AssignWordInfo(cand_word_t & tgt, wdata_t const & src)
-{
-    tgt.cnt = src.cnt;
-    tgt.id = src.id;
-    tgt.kind = ckOrig;
-    // do not empty tgt.str !!!
-}
-
-inline uint16_t PackInt32(uint32_t num) {
-    double r = double(num) / double(MAX_REAL_NUM);
-    assert(r >= 0.0 && r <= 1.0);
-    r = pow(r, 0.2);
-    r *= MAX_AVAILABLE_NUM;
-    return uint16_t(r);
-}
-
-inline uint32_t UnpackInt32(uint16_t num) {
-    double r = double(num) / double(MAX_AVAILABLE_NUM);
-    r = pow(r, 5.0);
-    r *= MAX_REAL_NUM;
-    return uint32_t(ceil(r));
-}
-
-template<typename T>
-void InitializeBuckets(const T& grams
-    , TPerfectHash& ph
-    , std::vector<std::pair<uint16_t, uint16_t>>& buckets
-) 
-{
-    for (auto&& it: grams) 
-    {
-        std::uint32_t const bucket = ph.Hash(it.first.bytes());
-        if (bucket >= buckets.size()) 
-        {
-            std::cerr << bucket << " " << buckets.size() << "\n";
-        }
-        assert(bucket < buckets.size());
-        std::pair<uint16_t, uint16_t> data;
-        data.first = CityHash16(it.first.bytes());
-        data.second = PackInt32(it.second);
-        buckets[bucket] = data;
-    }
 }
 
 
@@ -725,28 +603,6 @@ word_t TLangModel::LongestPrefixSearch(str_view_t const & word) const
     return (it != WordToId.end()) ? word_t{it.value(), str_t{it.key()}} : word_t{};
 }
 
-bool TLangModel::InitWordFromToken(token_info_t & tinf, word_t & w) const
-{    
-    if(tinf.size() < MAX_WORD_LENGTH * 2u   // concat of two longest words!!!
-        && ToAlphabet(Tokenizer.GetAlphabet(), tinf.str(), w.str, tinf.stat())
-    )
-    {   
-        if(tinf.size() == 1 && Tokenizer.isPunct(tinf.str().front()))
-        {
-            w.id = word_id_t::Any;
-        }                         
-        else 
-        {
-            w.reset (GetWordInfo(w.str));
-        }
-        return true;
-    }
-    // handle long or ill-formed words
-    //w.str = str_t{};
-    w.id = word_id_t::Any;
-    return false;
-}
-
 double TLangModel::CalcGram2Prob(wdata_t const & winf1
     , wdata_t const & winf2
 ) const
@@ -804,52 +660,26 @@ double TLangModel::CalcGram3Prob(wdata_t const & winf1
     return countsGram3 / countsGram2;
 }
 
-/*
-double TLangModel::GetGram1Prob(TWordId word) const {
-    double countsGram1 = GetGram1HashCount(word);
-    countsGram1 += K;
-    return countsGram1 / (TotalWords + VocabSize);
-}
-
-double TLangModel::GetGram2Prob(TWordId word1, TWordId word2) const {
-    double countsGram1 = GetGram1HashCount(word1);
-    double countsGram2 = GetGram2HashCount(word1, word2);
-    if (countsGram2 > countsGram1) { // (hash collision)
-        countsGram2 = 0;
+bool TLangModel::InitWordFromToken(token_info_t & tinf, word_t & w) const
+{    
+    if(tinf.size() < MAX_WORD_LENGTH * 2u   // concat of two longest words!!!
+        && ToAlphabet(Tokenizer.GetAlphabet(), tinf.str(), w.str, tinf.stat())
+    )
+    {   
+        if(tinf.size() == 1 && Tokenizer.isPunct(tinf.str().front()))
+        {
+            w.id = word_id_t::Any;
+        }                         
+        else 
+        {
+            w.reset (GetWordInfo(w.str));
+        }
+        return true;
     }
-    countsGram1 += TotalWords;
-    countsGram2 += K;
-    return countsGram2 / countsGram1;
-}
-
-double TLangModel::GetGram3Prob(TWordId word1, TWordId word2, TWordId word3) const {
-    double countsGram2 = GetGram2HashCount(word1, word2);
-    double countsGram3 = GetGram3HashCount(word1, word2, word3);
-    if (countsGram3 > countsGram2) { // hash collision
-        countsGram3 = 0;
-    }
-    countsGram2 += TotalWords;
-    countsGram3 += K;
-    return countsGram3 / countsGram2;
-}
-*/
-
-TCount TLangModel::GetGramHashCount(TGramKey const & key
-    , TPerfectHash const & ph
-    , buckets_type const & buckets
-) const
-{
-    uint32_t const bucket = ph.Hash(key.bytes());
-
-    assert(bucket < ph.BucketsNumber());
-    const std::pair<uint16_t, uint16_t>& data = buckets[bucket];
-
-    TCount res = TCount{};
-    if (data.first == CityHash16(key.bytes())) 
-    {
-        res = UnpackInt32(data.second);
-    }
-    return res;
+    // handle long or ill-formed words
+    //w.str = str_t{};
+    w.id = word_id_t::Any;
+    return false;
 }
 
 } // NJamSpell

@@ -108,6 +108,41 @@ TAlphabet::letter_type TAlphabet::GetSwitched(char const ch) const
     return ( i != m_switches.end() &&  i -> switched == ch) ? i -> real : ch;
 }
 
+token_stat_t TAlphabet::CalcTokenStat(str_view_t const & s) const
+{    
+    token_stat_t ts;
+
+    std::uint8_t vow_in_row = 0u, cons_in_row = 0;
+    for(char const c : s)
+    {        
+        kindCV_t const cvk = GetLetterKind(c);
+        bool const  is_vow = (cvk == kindCV_t::cvkVowel),
+                    is_cons = (cvk == kindCV_t::cvkConsonant)
+        ;
+
+        if(!is_vow)
+        {
+            ts.max_vovel_in_row = std::max(ts.max_vovel_in_row, vow_in_row);
+            vow_in_row = 0u;
+        }
+        if(!is_cons)
+        {
+            ts.max_consonant_in_row = std::max(ts.max_consonant_in_row, cons_in_row);
+            cons_in_row = 0u;
+        }
+
+        vow_in_row += is_vow;
+        cons_in_row += is_cons;
+
+        ts.vowel_cnt += is_vow;
+        ts.consonant_cnt += is_cons;
+
+    }
+    ts.max_consonant_in_row = std::max(ts.max_consonant_in_row, cons_in_row);
+    ts.max_vovel_in_row = std::max(ts.max_vovel_in_row, vow_in_row);   
+    return ts;
+}
+
 void TAlphabet::LoadLines(strings_type const & lines )
 {
     std::sort(m_letters.begin(), m_letters.end()); 

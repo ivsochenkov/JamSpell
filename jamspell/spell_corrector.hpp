@@ -97,6 +97,9 @@ public:
                 ,   SecondLvlPenalty            = 10.0       
                 ,   SwitchedWordPenalty         = 3.0
                 ,   SwitchedWordIsKnownPenalty  = 15.0
+
+                ,   LowProbPenalty              = 20.0
+                ,   BadTokenPenalty             = 30.0
                 ; 
             ;
 
@@ -122,6 +125,7 @@ public:
     );
 
     void DeepFix(context_t & cntxt) const;
+    context_t DeepFix(std::wstring const & text) const ;
 
     void Fix(context_t & cntxt) const;
     context_t Fix(std::wstring const & text) const;
@@ -140,6 +144,8 @@ public:
     }
 
 private:
+
+    using permutation_t = std::vector<std::uint8_t>;
 
     bool IsInfreq(word_t const & ow) const noexcept
     {
@@ -161,6 +167,12 @@ private:
     static context_range_t GetNextSent(context_t::iterator const & b
         , context_t::iterator const & e
     );
+
+    static void TrimCandidates(cntxt_word_t & curr_word
+        , std::size_t const cntxt_sz
+    );
+
+    static void AddOrig2Candidates(cntxt_word_t & curr_word);
 
     void FormCandidates(context_range_t const & context
         , ::std::size_t const position
@@ -280,9 +292,18 @@ private:
         , std::size_t const pos
     ) const;
 
+    static void ApplyP(context_range_t const & context, permutation_t const & p);
+
+    float PScore(context_range_t const & context, permutation_t const & p) const;
+
     void Score(context_range_t const & context, std::size_t const pos) const;
+    void DeepScore(context_range_t const & context) const;
 
     void ScoreCandidate (cntxt_word_t const & ctx_word, cand_word_t & cnd) const;
+
+    float ScoreOrig(context_range_t const & cntxt
+        , ::std::size_t const pos
+    ) const;
 
     TLangModel                      LangModel;
     std::unique_ptr<TBloomFilter>   Deletes1;
