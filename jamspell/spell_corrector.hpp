@@ -98,8 +98,8 @@ public:
                 ,   SwitchedWordPenalty         = 3.0
                 ,   SwitchedWordIsKnownPenalty  = 15.0
 
-                ,   LowProbPenalty              = 20.0
-                ,   BadTokenPenalty             = 30.0
+//                ,   LowProbPenalty              = 20.0
+//                ,   BadTokenPenalty             = 30.0
                 ; 
             ;
 
@@ -124,8 +124,10 @@ public:
             = TLangModel::train_options_t::ReadFromEnv()
     );
 
+#ifdef SPLL_DEEPFIX_EXPERIMENTAL
     void DeepFix(context_t & cntxt) const;
     context_t DeepFix(std::wstring const & text) const ;
+#endif // #ifdef SPLL_DEEPFIX_EXPERIMENTAL
 
     void Fix(context_t & cntxt) const;
     context_t Fix(std::wstring const & text) const;
@@ -297,13 +299,31 @@ private:
     float PScore(context_range_t const & context, permutation_t const & p) const;
 
     void Score(context_range_t const & context, std::size_t const pos) const;
+
+#ifdef SPLL_DEEPFIX_EXPERIMENTAL
     void DeepScore(context_range_t const & context) const;
+#endif // #ifdef SPLL_DEEPFIX_EXPERIMENTAL
 
     void ScoreCandidate (cntxt_word_t const & ctx_word, cand_word_t & cnd) const;
 
     float ScoreOrig(context_range_t const & cntxt
         , ::std::size_t const pos
     ) const;
+
+#ifdef SPLL_RESCORE_EXPERIMENTAL
+    float ReScore (word_t const & w, float sc, token_stat_t const ts) const
+    {
+        /*
+        float const gp = LangModel.CalcGram1Prob(w)
+            , ep = LangModel.ExpectedProb(w.str.size());
+
+        sc -= (gp < (ep / 2.0) ) ? m_opt.LowProbPenalty : 0.0;
+        */
+        sc -= LangModel.TokenIsBad(w.str, ts)  ?  m_opt.BadTokenPenalty : 0.0;
+
+       return sc;
+    }
+#endif // SPLL_RESCORE_EXPERIMENTAL
 
     TLangModel                      LangModel;
     std::unique_ptr<TBloomFilter>   Deletes1;

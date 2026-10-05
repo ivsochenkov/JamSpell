@@ -73,6 +73,9 @@ TSpellCorrector::opt_t TSpellCorrector::opt_t::ReadFromEnv()
     setValFromEnv(opt.SwitchedWordPenalty, "SPLL_SWITCHED_WORD_PEN");
     setValFromEnv(opt.SwitchedWordIsKnownPenalty, "SPLL_SWITCHED_WORD_IS_KNOWN_PEN");
 
+    //setValFromEnv(opt.LowProbPenalty, "SPLL_LOW_PROB_PENALTY");
+    //setValFromEnv(opt.BadTokenPenalty, "SPLL_BAD_TOKEN_PENALTY");
+
     setValFromEnv(opt.MaxCandidatesToCheck, "SPLL_MAX_CAND");
     
     return opt;
@@ -176,6 +179,7 @@ TSpellCorrector::GetCandidates(const std::vector<std::wstring>& sentence
 }
 */
 
+#ifdef SPLL_DEEPFIX_EXPERIMENTAL
 void TSpellCorrector::DeepFix(context_t & cntxt) const
 {
     for (auto orig_it = cntxt.begin(), e = cntxt.end()
@@ -217,6 +221,8 @@ context_t TSpellCorrector::DeepFix(std::wstring const & text) const
     DeepFix(cntxt);
     return cntxt;
 }
+
+#endif // #ifdef SPLL_DEEPFIX_EXPERIMENTAL
 
 void TSpellCorrector::Fix(context_t & cntxt) const
 {
@@ -969,7 +975,7 @@ void TSpellCorrector::Score(context_range_t const & context
     );
 }
 
-
+#ifdef SPLL_DEEPFIX_EXPERIMENTAL
 void TSpellCorrector:: DeepScore(context_range_t const & context) const
 {
     float max_score = std::numeric_limits<float>::lowest();
@@ -999,7 +1005,7 @@ void TSpellCorrector:: DeepScore(context_range_t const & context) const
     }
     ApplyP(context, best_p);
 }
-
+#endif //#ifdef SPLL_DEEPFIX_EXPERIMENTAL
 
 
 void 
@@ -1057,15 +1063,9 @@ TSpellCorrector
             break;
         }
     }
-
-    float const gp = LangModel.CalcGram1Prob(cnd)
-        , ep = LangModel.ExpectedProb(cnd.str.size());
-    cnd.score -= (gp < ep / 2.0) ? m_opt.LowProbPenalty : 0.0;
-
-
-    cnd.score -= LangModel.TokenIsBad(cnd.str, GetAlphabet().CalcTokenStat(cnd.str)) 
-        ?  m_opt.BadTokenPenalty : 0.0;
-
+#ifdef SPLL_RESCORE_EXPERIMENTAL
+    cnd.score = ReScore(cnd, cnd.score, GetAlphabet().CalcTokenStat(cnd.str));
+#endif
 }
 
 float TSpellCorrector::ScoreOrig(context_range_t const & cntxt
@@ -1073,16 +1073,20 @@ float TSpellCorrector::ScoreOrig(context_range_t const & cntxt
     ) const
 {
     cntxt_word_t const & cw = cntxt[pos];
-    float osc = LangModel.Score(GetSentenceRange(cntxt, pos))
-        , gp = LangModel.CalcGram1Prob(cw.orig_word)
-        , ep = LangModel.ExpectedProb(cw.orig_word.str.size());
+#ifndef SPLL_RESCORE_EXPERIMENTAL
 
-    osc -= (gp < (ep / 2.0) ) ? m_opt.LowProbPenalty : 0.0;
+    return LangModel.Score(GetSentenceRange(cntxt, pos));
 
-    osc -= ( LangModel.TokenIsBad(cw.orig_word.str, cw.token.stat()) ) 
-        ?  m_opt.BadTokenPenalty : 0.0;
+#else
 
-    return osc;
+    return ReScore(cw.orig_word
+        , LangModel.Score(GetSentenceRange(cntxt, pos))
+        , cw.token.stat()
+    );
+
+#endif // #ifdef SPLL_RESCORE_EXPERIMENTAL
+
 }
+
 
 } // NJamSpell
