@@ -97,9 +97,10 @@ public:
                 ,   SecondLvlPenalty            = 10.0       
                 ,   SwitchedWordPenalty         = 3.0
                 ,   SwitchedWordIsKnownPenalty  = 15.0
+                ,   BadTokenPenalty             = 25.0
 
 //                ,   LowProbPenalty              = 20.0
-//                ,   BadTokenPenalty             = 30.0
+
                 ; 
             ;
 
@@ -310,7 +311,6 @@ private:
         , ::std::size_t const pos
     ) const;
 
-#ifdef SPLL_RESCORE_EXPERIMENTAL
     float ReScore (word_t const & w, float sc, token_stat_t const ts) const
     {
         /*
@@ -323,7 +323,6 @@ private:
 
        return sc;
     }
-#endif // SPLL_RESCORE_EXPERIMENTAL
 
     TLangModel                      LangModel;
     std::unique_ptr<TBloomFilter>   Deletes1;

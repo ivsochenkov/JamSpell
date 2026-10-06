@@ -72,10 +72,10 @@ TSpellCorrector::opt_t TSpellCorrector::opt_t::ReadFromEnv()
     setValFromEnv(opt.SecondLvlPenalty, "SPLL_SECOND_LVL_PEN");
     setValFromEnv(opt.SwitchedWordPenalty, "SPLL_SWITCHED_WORD_PEN");
     setValFromEnv(opt.SwitchedWordIsKnownPenalty, "SPLL_SWITCHED_WORD_IS_KNOWN_PEN");
+    setValFromEnv(opt.BadTokenPenalty, "SPLL_BAD_TOKEN_PENALTY");
 
     //setValFromEnv(opt.LowProbPenalty, "SPLL_LOW_PROB_PENALTY");
-    //setValFromEnv(opt.BadTokenPenalty, "SPLL_BAD_TOKEN_PENALTY");
-
+    
     setValFromEnv(opt.MaxCandidatesToCheck, "SPLL_MAX_CAND");
     
     return opt;
@@ -1063,9 +1063,11 @@ TSpellCorrector
             break;
         }
     }
-#ifdef SPLL_RESCORE_EXPERIMENTAL
-    cnd.score = ReScore(cnd, cnd.score, GetAlphabet().CalcTokenStat(cnd.str));
-#endif
+
+    token_stat_t ts {GetAlphabet().CalcTokenStat(cnd.str)};
+    ts.is_title_case = ctx_word.token.stat().is_title_case;
+    cnd.score = ReScore(cnd, cnd.score, ts);
+
 }
 
 float TSpellCorrector::ScoreOrig(context_range_t const & cntxt
@@ -1073,18 +1075,10 @@ float TSpellCorrector::ScoreOrig(context_range_t const & cntxt
     ) const
 {
     cntxt_word_t const & cw = cntxt[pos];
-#ifndef SPLL_RESCORE_EXPERIMENTAL
-
-    return LangModel.Score(GetSentenceRange(cntxt, pos));
-
-#else
-
     return ReScore(cw.orig_word
         , LangModel.Score(GetSentenceRange(cntxt, pos))
         , cw.token.stat()
     );
-
-#endif // #ifdef SPLL_RESCORE_EXPERIMENTAL
 
 }
 
