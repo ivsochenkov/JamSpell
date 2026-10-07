@@ -15,8 +15,8 @@ inline bool TTokenizer::good4join (text_tokens_const_iterator_t const & a
 ) const
 {
     return isGoodWordToken(*c) 
-        && isNotSpaceDelimited(a, b) 
-        && isNotSpaceDelimited(b, c)
+        && areNotSpaceDelimited(a, b) 
+        && areNotSpaceDelimited(b, c)
         && (b -> size() == 1) && isA(b -> front(), L"-\'");
 }
 
@@ -24,59 +24,12 @@ inline bool TTokenizer::good4join(text_tokens_const_iterator_t const& a
     , text_tokens_const_iterator_t const & b
 ) const
 {
-    return isNotSpaceDelimited(a, b) 
+    return areNotSpaceDelimited(a, b) 
         && !((a -> size() == 1) && isA(a -> front(), L"([{")) 
         && !((b -> size() == 1) && isA(b -> front(), L".,;:!?)")); 
     ; 
 }
 
-void TTokenizer::Filter4Spell(text_tokens_t & tokens) const
-{
-    if(tokens.empty())
-    {
-        return;
-    }
-
-#if 0
-    text_tokens_t::iterator tgt_it = tokens.begin();
-    for (text_tokens_t::iterator nxt_it = tgt_it, e = tokens.end()
-        ; ++nxt_it != e
-        ;
-    )
-    {
-        if(good4join (tgt_it, nxt_it))
-        {
-            tgt_it -> reset (tgt_it -> pos() 
-                , nxt_it -> pos() + nxt_it -> size() - tgt_it -> pos()
-            );
-        }
-        else
-        {
-            (++tgt_it) -> assign (*nxt_it);
-        }
-    }
-
-    text_tokens_t::iterator const e = ++tgt_it; // N!B!
-    for (text_tokens_t::iterator i = tgt_it = tokens.begin()
-        ; i != e
-        ; ++i
-    )
-    {
-        std::size_t const tsz = i -> size();
-        if( tsz < max_word_length && 
-            (tsz > 1u  || (tsz > 0u && isSentBreak(i, e))) 
-        )
-        {
-            (tgt_it++) -> assign (*i);
-        }
-    }
-
-    tokens.resize(std::distance(tokens.begin(), tgt_it));
-#else   // #if 0
-
-#endif  // #if 0
-
-}
 
 void TTokenizer::Filter4Train(text_tokens_t & tokens) const
 {
@@ -109,7 +62,6 @@ void TTokenizer::Filter4Train(text_tokens_t & tokens) const
                 {
                     tgt_it -> reset (tgt_it -> ofs() 
                         , nxt_it -> ofs() + nxt_it -> size() - tgt_it -> ofs()
-                        // , std::distance(tgt_it -> data(), nxt_it -> data() + nxt_it -> size())
                     );
                     //prev_tok_is_good = true; // remains true, so don't needed!
                     i = nxt_it;
@@ -194,15 +146,5 @@ void TTokenizer::FilterHyphen(std::wstring & txt)
     txt.resize(std::distance(txt.begin(), tgt));
 }
 
-/*
-text_tokens_const_iterator_t GetNextSentEnd(text_tokens_const_iterator_t b
-    , text_tokens_const_iterator_t const & e
-)
-{
-    for(; (b != e) && (! TTokenizer::isSentEnd( *b )) ; ++b )
-    {}
-    return b;
-}
-*/
 
 } // NJamSpell

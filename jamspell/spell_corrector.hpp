@@ -98,6 +98,7 @@ public:
                 ,   SwitchedWordPenalty         = 3.0
                 ,   SwitchedWordIsKnownPenalty  = 15.0
                 ,   BadTokenPenalty             = 25.0
+                ,   ShortFragmentPenalty        = 60.0
 
 //                ,   LowProbPenalty              = 20.0
 
@@ -105,7 +106,7 @@ public:
             ;
 
         ::std::size_t         MaxCandidatesToCheck = 64
-                            , InFreqWordCntThreshold = 30 // experimental!
+                            , InFreqWordCntThreshold = 300 // experimental!
         ;
 
         static opt_t ReadFromEnv();
@@ -164,12 +165,17 @@ private:
         return cmgr.best_cnt() < m_opt.InFreqWordCntThreshold;
     }
 
+    static bool IsShortFragment(cntxt_word_t const &cw ) noexcept
+    {
+        return cw.concat.right > 1u;        
+    }
+
     TAlphabet const & GetAlphabet() const noexcept
     { return GetLangModel().GetTokenizer().GetAlphabet(); }
 
-    static context_range_t GetNextSent(context_t::iterator const & b
+    context_range_t GetNextSent(context_t::iterator const & b
         , context_t::iterator const & e
-    );
+    ) const;
 
     static void TrimCandidates(cntxt_word_t & curr_word
         , std::size_t const cntxt_sz
@@ -181,6 +187,11 @@ private:
         , ::std::size_t const position
     ) const;
 
+    ::std::size_t CheckExtendedTokenStr(context_range_t const & cntxt
+        , ::std::size_t const pos
+        , TCandMgr & cmgr
+    ) const;
+
     void ProcessCandidates(context_range_t const & context
         , ::std::size_t const position
     ) const
@@ -189,8 +200,9 @@ private:
         Score(context, position);
     }
 
-    concat_inf_t CntNonSpacedNeighbours(context_range_t const & context
+    ::std::size_t CntNonSpacedNeighbours(context_range_t const & context
         , ::std::size_t const position
+        , concat_inf_t & i
     ) const;
 
     bool PrevWordWasSwitched(context_range_t const & context
@@ -211,12 +223,12 @@ private:
         , TCandMgr & cmgr       
     ) const;
 
-    void MakeLeftSwCandsStrPrefix(context_range_t const & context
+    void MakeLeftCandsStrPrefix(context_range_t const & context
         , ::std::size_t const position
         , str_t & s
     ) const;
 
-    void MakeRightSwCandsStr(context_range_t const & context
+    void MakeRightCandsStr(context_range_t const & context
         , ::std::size_t const position
         , str_t & s
     ) const;
@@ -295,9 +307,11 @@ private:
         , std::size_t const pos
     ) const;
 
+#ifdef SPLL_DEEPFIX_EXPERIMENTAL
     static void ApplyP(context_range_t const & context, permutation_t const & p);
 
     float PScore(context_range_t const & context, permutation_t const & p) const;
+#endif // #ifdef SPLL_DEEPFIX_EXPERIMENTAL
 
     void Score(context_range_t const & context, std::size_t const pos) const;
 
@@ -320,8 +334,7 @@ private:
         sc -= (gp < (ep / 2.0) ) ? m_opt.LowProbPenalty : 0.0;
         */
         sc -= LangModel.TokenIsBad(w.str, ts)  ?  m_opt.BadTokenPenalty : 0.0;
-
-       return sc;
+        return sc;
     }
 
     TLangModel                      LangModel;

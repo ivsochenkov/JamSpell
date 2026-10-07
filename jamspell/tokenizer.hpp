@@ -67,29 +67,13 @@ private:
 
     static inline bool isHardSentEnd(wchar_t const ch)
     { return ch == L'!' || ch == L'?'; }
-
-    bool isSentBreak(text_tokens_const_iterator_t const curr_tok_it
-        , text_tokens_const_iterator_t const e
-    ) const
-    {
-        wchar_t const curr_wch{curr_tok_it -> front()};
-        text_tokens_const_iterator_t next {curr_tok_it}; ++next;
-
-        return isHardSentEnd(curr_wch) 
-            || (isSoftSentEnd(curr_wch)
-                &&  (    next == e 
-                    || (isCapitalLetter(next -> front()) 
-                            && ( iSpaceDelimited(curr_tok_it, next) ) )
-                    )
-                );
-    }
     
-    bool iSpaceDelimited(text_tokens_const_iterator_t const curr_tok_it
+    bool areSpaceDelimited(text_tokens_const_iterator_t const curr_tok_it
         , text_tokens_const_iterator_t const next
     ) const 
     { return areSpaced(*curr_tok_it, *next);}  
 
-    bool isNotSpaceDelimited(text_tokens_const_iterator_t const curr_tok_it
+    bool areNotSpaceDelimited(text_tokens_const_iterator_t const curr_tok_it
         , text_tokens_const_iterator_t const  next
     ) const 
     { return areNotSpaced(*curr_tok_it, *next);}  
@@ -135,10 +119,27 @@ public:
         , TTokens & rtoks
         , sep_type const & sep = sep_type{}
     ) const;
-    
-    void Filter4Spell(text_tokens_t & tokens) const;
+
+    template <typename TTtokens>
+    void Filter4Spell(TTtokens & tokens) const;
 
     void Filter4Train(text_tokens_t & tokens) const;
+
+    template <typename TTokenIt>
+    bool isSentBreak(TTokenIt const curr_tok_it, TTokenIt const e) const
+    {
+        wchar_t const curr_wch{GetToken(*curr_tok_it).front()};
+        TTokenIt next {curr_tok_it}; ++next;
+
+        return isHardSentEnd(curr_wch) 
+            || (isSoftSentEnd(curr_wch)
+                &&  (    next == e 
+                    || (isCapitalLetter(GetToken(*next).front()) 
+                        && ( areSpaced(GetToken(*curr_tok_it), GetToken(*next))) 
+                       )
+                    )
+                ); // LISPanyk is happy! =)
+    }
     
     static bool isSentEnd(token_info_t const & t)
     { 
@@ -196,30 +197,53 @@ void TTokenizer::Parse(wstr_view_t const & txt
     }
 }
 
-/*
-text_tokens_const_iterator_t GetNextSentEnd(text_tokens_const_iterator_t b
-    , text_tokens_const_iterator_t const & e
-);
 
-inline text_tokens_const_iterator_range_t
-GetNextSent(text_tokens_const_iterator_t b
-    , text_tokens_const_iterator_t const & e
-)
+template <typename TTtokens>
+void TTokenizer::Filter4Spell(TTtokens & tokens) const
 {
-    return boost::make_iterator_range(b, GetNextSentEnd(b, e ));
+    if(tokens.empty())
+    {
+        return;
+    }
+
+#if 0
+    auto tgt_it = tokens.begin();
+    for (auto nxt_it = tgt_it, e = tokens.end()
+        ; ++nxt_it != e
+        ;
+    )
+    {
+        if(Joinable(tgt_it, nxt_it))
+        {
+            DoJoin(*tgt_it, *nxt_it)
+            /*
+            tgt_it -> reset (tgt_it -> pos() 
+                , nxt_it -> pos() + nxt_it -> size() - tgt_it -> pos()
+            );
+            */
+        }
+        else
+        {
+            *(++tgt_it) = std::move(*nxt_it);
+        }
+    }
+
+    auto const e = ++tgt_it; // N!B!
+    for (auto i = tgt_it = tokens.begin(); i != e; ++i)
+    {
+        std::size_t const tsz = GetTokenSize(*i);
+        if( tsz < max_word_length && 
+            (tsz > 1u  || (tsz > 0u && isSentBreak(i, e))) 
+        )
+        {
+            (tgt_it++) -> assign (*i);
+        }
+    }
+
+    tokens.resize(std::distance(tokens.begin(), tgt_it));
+#endif
+
 }
 
-inline candidates_range_t
-MapSentence (candidates_t & contxt
-    , text_tokens_t const & orig_txt_tokens
-    , text_tokens_const_iterator_range_t const & curr_sent
-)
-{
-    auto wbeg = contxt.begin(), wend = wbeg;
-    std::advance(wbeg, std::distance(orig_txt_tokens.begin(), curr_sent.begin()));
-    std::advance(wend, std::distance(orig_txt_tokens.begin(), curr_sent.end()));
-    return candidates_range_t{wbeg, wend};
-}
-*/
 
 } // NJamSpell

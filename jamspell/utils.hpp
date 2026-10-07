@@ -136,6 +136,15 @@ private:
 
 };
 
+////////////////////////////////////////////////////////////////////////////////
+
+inline token_info_t const & GetToken(token_info_t const & ti) 
+{
+    return ti;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+
 //using text_tokens_t    = std::vector<wstr_view_t>;
 using text_tokens_t    = std::vector<token_info_t>;
 using text_tokens_iterator_t = text_tokens_t::iterator;
@@ -238,18 +247,22 @@ struct orig_word_greater_by_cnt_t
 enum cand_kind_t : unsigned char
 {
         ckNone          = 0u
-    ,   ckOrig                  
-    ,   ckOrigSw                
-    ,   ckFirstLvl          
-    ,   ckSecondLvl         
-    ,   ckFirstLvlSw            
-    ,   ckSecondLvlSw           
+    ,   ckOrig
+    ,   ckOrigSw
+    ,   ckFirstLvl
+    ,   ckSecondLvl
+    ,   ckFirstLvlSw 
+    ,   ckSecondLvlSw
+    ,   ckFirstLvlFrgmt
+    ,   ckSecondLvlFrgmt
 };
 
+/*
 inline cand_kind_t NextLevel(cand_kind_t const ck)
 {
     return cand_kind_t(ck + 1u);
 }
+*/
 
 template <typename TWIt>
 TWIt Advance2Next(TWIt beg, TWIt const & e)
@@ -388,6 +401,11 @@ inline word_t & Word(cntxt_word_t & cw) noexcept
 inline bool IsWord(cntxt_word_t const & cw) noexcept 
 {
     return cw.orig_word.is_word();
+}
+
+inline token_info_t const & GetToken(cntxt_word_t const & cw) 
+{
+    return cw.token;
 }
 
 void SortCandidates(cntxt_word_t & cw) noexcept;
