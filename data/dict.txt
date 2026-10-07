@@ -31,6 +31,8 @@ krk
 sks
 Nth
 Cwm
+PhD
+GPSS
 pht
 Twp
 Tsk        
@@ -71,3 +73,7 @@ ayaya
 I
 я
 гг
+PITIPITIPIW
+WIW
+джагон
+awawa

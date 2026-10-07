@@ -77,6 +77,7 @@ TSpellCorrector::opt_t TSpellCorrector::opt_t::ReadFromEnv()
     //setValFromEnv(opt.LowProbPenalty, "SPLL_LOW_PROB_PENALTY");
     
     setValFromEnv(opt.MaxCandidatesToCheck, "SPLL_MAX_CAND");
+    setValFromEnv(opt.InFreqWordCntThreshold, "SPLL_INFREQ_THRESHOLD");
     
     return opt;
 }
@@ -345,6 +346,7 @@ void TSpellCorrector::FormCandidates(context_range_t const & context
     curr_word.attrs.prev_was_switched = PrevWordWasSwitched(context, position);
     CntNonSpacedNeighbours(context, position, curr_word.concat);
     curr_word.orig_word.score = ScoreOrig(context, position);
+    ::std::size_t const cw_letter_cnt = curr_word.orig_word.str.size();
 
     JS_TRACE_MSG(std::cerr << "[debug] Scored orig: \'" 
         << w_to_u8(FromAlphabet(GetAlphabet(), orig_word.str)) 
@@ -352,13 +354,13 @@ void TSpellCorrector::FormCandidates(context_range_t const & context
         << " count = " << orig_word.cnt << " score = " <<orig_word.score << "\n"
     );    
     
-    // PITIPIWPIW WIW WIW!
+    // PITIPITIPIW WIW WIW
     TCandMgr cndMgr(curr_word.candidates, m_opt.MaxCandidatesToCheck);
     
     ::std::size_t e2_cnt_added = 0u;
     if(IsShortFragment(curr_word))
     {
-        if (curr_word.orig_word.str.size() > (1u + curr_word.attrs.prev_was_switched))
+        if ( cw_letter_cnt > (1u + curr_word.attrs.prev_was_switched))
         {
             cndMgr.set_kind (ckFirstLvlFrgmt);
             e2_cnt_added += Edits2(orig_word.str, cndMgr);
@@ -368,8 +370,12 @@ void TSpellCorrector::FormCandidates(context_range_t const & context
     }
     else
     {
-        if (curr_word.orig_word.str.size() > 1)
+        if (cw_letter_cnt > 1u)
         {
+            if (orig_word.unknown() && cw_letter_cnt >= 4u)
+            {
+                //Try2Split(context, position);
+            }
             cndMgr.set_kind (ckFirstLvl);
             e2_cnt_added += Edits2(orig_word.str, cndMgr);
         }
@@ -384,12 +390,12 @@ void TSpellCorrector::FormCandidates(context_range_t const & context
         CheckSwitchedCands(context, position, cndMgr);   
     }
 
-    if(     orig_word.unknown()
+    if(     orig_word.unknown() && (cw_letter_cnt > 1u)
         &&  (!e2_cnt_added || CandidatesAreInfreq(cndMgr) )
     )
     {
         cndMgr.set_kind (
-            curr_word.concat.right > 1u  ? ckSecondLvlFrgmt : ckSecondLvl
+            IsShortFragment(curr_word)  ? ckSecondLvlFrgmt : ckSecondLvl
         );
         Edits(orig_word.str, cndMgr);
     }

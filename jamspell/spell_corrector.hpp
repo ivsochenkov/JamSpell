@@ -3,7 +3,7 @@
 #include "lang_model.hpp"
 #include "bloom_filter.hpp"
 
-#include <contrib/tsl/robin_map.h>
+#include <contrib/tsl/robin_set.h>
 
 #include <boost/range/iterator_range.hpp>
 
@@ -20,26 +20,33 @@ class TCandMgr
         { return lhs.cnt > rhs.cnt; }  // max-heap!
     }; 
 
+    using word_set_t = tsl::robin_set<word_id_t>;
+
 public:
 
     using result_type = impl_type;
 
     explicit TCandMgr (candidates_t & cands, std::size_t const maxCandCnt = 64u)
-    : m_impl{cands}, m_max_sz{maxCandCnt}, m_best_cnt {0u}, m_cand_kind{ckFirstLvl}
+    : m_impl{cands}
+    , m_word_set{}
+    , m_max_sz{maxCandCnt}\
+    , m_best_cnt {0u}
+    , m_cand_kind{ckFirstLvl}
     {
         m_impl.reserve(maxCandCnt);
+        m_word_set.reserve(maxCandCnt);
     }
 
     void set_kind (cand_kind_t const ck) { m_cand_kind = ck;}
 
-    /*
-    cand_word_t & push (wdata_t const & wd, str_t && s, cand_kind_t const k)
-    {return m_impl.emplace_back(wd, std::move(s), k);}
-    */
-
     template <typename TStr>
     bool insert (wdata_t const & wd, TStr && s, concat_inf_t const & drop)
     {
+        if(!m_word_set.insert(wd.id).second)
+        {
+            return false;
+        }
+
         if (m_best_cnt < wd.cnt )
         {
             m_best_cnt = wd.cnt;
@@ -74,6 +81,7 @@ private:
     void reset_heap_impl ();
 
     impl_type        &  m_impl;
+    word_set_t          m_word_set;
     std::size_t const   m_max_sz;
     cnt_t               m_best_cnt  = 0;
 
@@ -106,7 +114,7 @@ public:
             ;
 
         ::std::size_t         MaxCandidatesToCheck = 64
-                            , InFreqWordCntThreshold = 300 // experimental!
+                            , InFreqWordCntThreshold = 300 
         ;
 
         static opt_t ReadFromEnv();
