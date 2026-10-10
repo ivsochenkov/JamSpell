@@ -360,13 +360,16 @@ void TSpellCorrector::FormCandidates(context_range_t const & context
     ::std::size_t e2_cnt_added = 0u;
     if(IsShortFragment(curr_word))
     {
-        if ( cw_letter_cnt > (1u + curr_word.attrs.prev_was_switched))
+        // we ignore punct to the left side of token!
+        e2_cnt_added += CheckExtendedTokenStr(context, position, cndMgr);    
+
+        if ( (!e2_cnt_added) 
+            && cw_letter_cnt > (1u + curr_word.attrs.prev_was_switched)
+        )
         {
             cndMgr.set_kind (ckFirstLvlFrgmt);
             e2_cnt_added += Edits2(orig_word.str, cndMgr);
-        }
-        // we ignore punct to the left side of token!
-        e2_cnt_added += CheckExtendedTokenStr(context, position, cndMgr);        
+        }            
     }
     else
     {
@@ -391,7 +394,9 @@ void TSpellCorrector::FormCandidates(context_range_t const & context
     }
 
     if(     orig_word.unknown() && (cw_letter_cnt > 1u)
-        &&  (!e2_cnt_added || CandidatesAreInfreq(cndMgr) )
+        &&  (!e2_cnt_added 
+            || CandidatesAreInfreq(cndMgr) && context.size() > 1u
+        )
     )
     {
         cndMgr.set_kind (
@@ -412,21 +417,25 @@ TSpellCorrector::CheckExtendedTokenStr(context_range_t const & cntxt
     BOOST_ASSERT_MSG(cw.concat.right > 1u, "Bad extended token!");
     str_t s {cw.orig_word.str};
     MakeRightCandsStr(cntxt, pos, s);
+
+    bool const ends_with_punct = cntxt[pos + cw.concat.right].orig_word.is_punct();
+    concat_inf_t const ci (0u, cw.concat.right - ends_with_punct);
+    s.resize(s.size() - ends_with_punct);
   
-    ::std::size_t cnt_added = 0u;
-    cmgr.set_kind (ckFirstLvl);
-    cnt_added += Edits2(s, cmgr
-        , concat_inf_t(0u
-            , cw.concat.right - cntxt[pos + cw.concat.right].orig_word.is_punct()
-        )
-    );
-
-    if((!cnt_added) || CandidatesAreInfreq(cmgr))
+    cmgr.set_kind (ckOrig);
+    ::std::size_t cnt_added = LookupAndAppend2Candidates(s, cmgr, ci);
+    if(!cnt_added || CandidatesAreInfreq(cmgr))
     {
-        cmgr.set_kind (ckSecondLvl);
-        Edits(s, cmgr);
-    }
+        cmgr.set_kind (ckFirstLvl);
+        cnt_added += Edits2(s, cmgr, ci);
 
+        if((!cnt_added) || CandidatesAreInfreq(cmgr))
+        {
+            cmgr.set_kind (ckSecondLvl);
+            Edits(s, cmgr);
+        }
+    }
+    
     return cnt_added;
 }
 
@@ -1078,6 +1087,12 @@ TSpellCorrector
 {
     switch (cnd.kind)
     {
+        case ckOrig:
+        {
+            cnd.score -= (!ctx_word.attrs.prev_was_switched) * m_opt.SwitchedWordPenalty;
+            break;
+        }
+
         case ckOrigSw:
         {
             cnd.score -= (!ctx_word.orig_word.unknown()) ? 
