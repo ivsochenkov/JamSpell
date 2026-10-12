@@ -74,6 +74,7 @@ TLangModel::train_options_t TLangModel::train_options_t::ReadFromEnv()
     TLangModel::train_options_t opt{};
 
     setValFromEnv(opt.max_grams_sz, "SPLL_MAX_GRAMS_SIZE");
+    setValFromEnv(opt.max_dict_size, "SPLL_MAX_DICT_SIZE");
     setValFromEnv(opt.ngram_thresholds[0], "SPLL_1_GRAM_THRS");
     setValFromEnv(opt.ngram_thresholds[1], "SPLL_2_GRAM_THRS");
     setValFromEnv(opt.ngram_thresholds[2], "SPLL_3_GRAM_THRS");
@@ -369,9 +370,10 @@ void TLangModel::TGramLoader::Reduce ()
         }
     } 
 
-    CleanupVocabulary();
-
-    //m_tr_opt.max_grams_sz *= m_tr_opt.growth_factor;
+    if(LM.WordToId.size() > m_tr_opt.max_dict_size)
+    {
+        CleanupVocabulary();
+    }
 
     std::cerr << "--[info] finished reduce of grams: size = " << m_grams.size() 
         //<< " new max_grams_sz = "<< m_tr_opt.max_grams_sz 

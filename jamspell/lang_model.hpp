@@ -246,10 +246,12 @@ public:
 
     struct train_options_t
     {
-        std::size_t             max_grams_sz        = 100000000;
-        std::array<unsigned, 3> ngram_thresholds    = {7, 5, 3};
-                        
-        //float                   growth_factor       = 1.003;
+        using thresholds_type = std::array<unsigned short, 3>;
+
+        std::size_t             max_grams_sz        = 100000000u
+                            ,   max_dict_size       = 5000000u;
+                            ;
+        thresholds_type         ngram_thresholds    = {7u, 5u, 3u};
 
         static train_options_t make_default();
 
@@ -318,15 +320,6 @@ public:
         insR.first.value().cnt += c;
         LastWordID += insR.second;
         return insR.first.value().id;
-    }
-
-    TWordId UpdateWordId(str_view_t const & word
-        , bool if_present
-        , cnt_t const c = 1u
-    )
-    {
-        return (if_present) ? UpdateWordIdIfPresent(word, c) 
-            : UpdateWordId (word, c);
     }
 
     TWordId GetWordId(str_view_t const & word) const
