@@ -288,55 +288,50 @@ void TLangModel::TGramLoader::FillGramms(text_tokens_iterator_t b
 { 
     TGramKey gram_key;
     str_t alStr;
-    for (bool it_is_all_over = (b == e); (!it_is_all_over) && b != e; ++b )
-    {
-        unsigned c = 0u;
-        for(
-            ; (!(it_is_all_over = (b == e))) && !(TTokenizer::isSentEnd(*b))
-            ; ++b 
+    unsigned c = 0u;
+    for (; b != e; ++b )
+    {        
+        if(    LM.Tokenizer.isSentBreak(b, e)
+            || ( b -> size() > MAX_WORD_LENGTH )
+            || (!ToAlphabet(GetAlphabet(), b -> str(), alStr, b -> stat()))
         )
         {
-            if( b -> size() > MAX_WORD_LENGTH 
-                ||  (!ToAlphabet(GetAlphabet(), b -> str(), alStr, b -> stat()))
-            )
+            c = 0u;
+            continue;
+        }
+
+        if( IsBad(alStr, b -> stat()) )
+        {                
+            if (TWordId::Unknown == (gram_key[c] = LM.UpdateWordIdIfPresent(alStr)))
             {
                 c = 0u;
                 continue;
             }
-
-            if( IsBad(alStr, b -> stat()) )
-            {                
-                if (TWordId::Unknown == (gram_key[c] = LM.UpdateWordIdIfPresent(alStr)))
-                {
-                    c = 0u;
-                    continue;
-                }
-            }
-            else 
-            {
-                gram_key[c] = LM.UpdateWordId(alStr);
-            }
-            
-            ++LM.TotalWords;
-
-            switch (c)
-            {
-                case 2u:
-                {
-                    ++m_grams[gram_key];
-                    ++m_grams[TGramKey(gram_key[0u], TWordId::Any, gram_key[2u])];
-                    ShiftLeft(gram_key);
-                    // no break!
-                }
-                case 1u:
-                {
-                    ++m_grams[TGramKey(gram_key[0u], gram_key[1u])];
-                }               
-        
-            }
-            c += (c < 2);   // NOTE: Must be here! Not in cycle due to continue 
-                            // statement above
         }
+        else 
+        {
+            gram_key[c] = LM.UpdateWordId(alStr);
+        }
+            
+        ++LM.TotalWords;
+
+        switch (c)
+        {
+            case 2u:
+            {
+                ++m_grams[gram_key];
+                ++m_grams[TGramKey(gram_key[0u], TWordId::Any, gram_key[2u])];
+                ShiftLeft(gram_key);
+                // no break!
+            }
+            case 1u:
+            {
+                ++m_grams[TGramKey(gram_key[0u], gram_key[1u])];
+            }               
+        }
+        c += (c < 2);   // NOTE: Must be here! Not in cycle due to continue 
+                        // statement above
+        
         //gram_key = TGramKey{};    // Not needed
     }
     
