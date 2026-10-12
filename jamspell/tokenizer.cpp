@@ -106,7 +106,7 @@ text_tokens_t TTokenizer::Parse(wstr_view_t const & txt
     return ret;
 }
 
-bool TTokenizer::isA(wchar_t const ch, wchar_t const * chrs)
+bool TTokenizer::isA(wchar_t const ch, wchar_t const * chrs) noexcept
 {
     do 
     {

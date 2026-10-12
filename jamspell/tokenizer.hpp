@@ -18,13 +18,13 @@ class TTokenizer
     class token_t: public wstr_view_t
     {
     public:
-        void assign(iterator const b, iterator const e) 
+        void assign(iterator const b, iterator const e) noexcept
         { 
             static_cast<wstr_view_t &> (*this) 
                 = wstr_view_t(b, std::distance(b, e)); 
         }
 
-        token_info_t make_info (wstr_view_t const & txt) const
+        token_info_t make_info (wstr_view_t const & txt) const noexcept
         {
             return token_info_t{txt
                 , static_cast<token_info_t::ofs_type>(std::distance(txt.begin(), this -> begin()))
@@ -60,22 +60,22 @@ public:
 
 private:
 
-    static inline bool isSoftSentEnd(wchar_t const ch)
+    static inline bool isSoftSentEnd(wchar_t const ch) noexcept
     { 
         return ch == L'.' || ch == 0x2026; // "..."
     }
 
-    static inline bool isHardSentEnd(wchar_t const ch)
+    static inline bool isHardSentEnd(wchar_t const ch) noexcept
     { return ch == L'!' || ch == L'?'; }
     
     bool areSpaceDelimited(text_tokens_const_iterator_t const curr_tok_it
         , text_tokens_const_iterator_t const next
-    ) const 
+    ) const noexcept
     { return areSpaced(*curr_tok_it, *next);}  
 
     bool areNotSpaceDelimited(text_tokens_const_iterator_t const curr_tok_it
         , text_tokens_const_iterator_t const  next
-    ) const 
+    ) const noexcept
     { return areNotSpaced(*curr_tok_it, *next);}  
 
     bool isCapitalLetter(wchar_t const wch)const 
@@ -103,7 +103,7 @@ public:
                                     ,   avg_word_len = 4
                                     ;
 
-    static constexpr std::size_t get_approx_word_cnt(std::size_t const txt_sz) 
+    static constexpr std::size_t get_approx_word_cnt(std::size_t const txt_sz) noexcept
     { return 1u + txt_sz / avg_word_len;}
 
     TTokenizer();
@@ -126,7 +126,7 @@ public:
     void Filter4Train(text_tokens_t & tokens) const;
 
     template <typename TTokenIt>
-    bool isSentBreak(TTokenIt const curr_tok_it, TTokenIt const e) const
+    bool isSentBreak(TTokenIt const curr_tok_it, TTokenIt const e) const 
     {
         wchar_t const curr_wch{GetToken(*curr_tok_it).front()};
         TTokenIt next {curr_tok_it}; ++next;
@@ -153,7 +153,7 @@ public:
         return std::ispunct(ch, Locale);
     }
 
-    static bool isA(wchar_t const ch, wchar_t const * chrs);    
+    static bool isA(wchar_t const ch, wchar_t const * chrs) noexcept;    
 
     bool isWordToken (token_info_t const & token) const
     {
