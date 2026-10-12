@@ -159,7 +159,7 @@ private:
 
     void FillGramms(text_tokens_iterator_t b, text_tokens_iterator_t const & e);
 
-    void Reduce ();
+    void Reduce (bool const force_vocab_cleanup = false);
 
     void ReduceIfNeeded ()
     {
@@ -227,7 +227,7 @@ bool TLangModel::TGramLoader::Train(const std::string& fName)
             }
         }        
     }
-    Reduce();          
+    Reduce(true);          
     return lcnt;  
 }
 
@@ -344,10 +344,9 @@ void TLangModel::TGramLoader::FillGramms(text_tokens_iterator_t b
     }
     
     ReduceIfNeeded();
-    //Finalize();
 }
 
-void TLangModel::TGramLoader::Reduce ()
+void TLangModel::TGramLoader::Reduce (bool const force_vocab_cleanup)
 {
     std::cerr << "--[info] started reduce of grams: size = " << m_grams.size() 
         << " with threshold="<< m_tr_opt.max_grams_sz << std::endl;
@@ -370,7 +369,7 @@ void TLangModel::TGramLoader::Reduce ()
         }
     } 
 
-    if(LM.WordToId.size() > m_tr_opt.max_dict_size)
+    if(force_vocab_cleanup || (LM.WordToId.size() > m_tr_opt.max_dict_size))
     {
         CleanupVocabulary();
     }
