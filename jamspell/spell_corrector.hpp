@@ -16,7 +16,9 @@ class TCandMgr
 
     struct wheap_order_t
     {
-        bool operator () (cand_word_t const & lhs, cand_word_t const & rhs) const 
+        bool operator () (cand_word_t const & lhs
+            , cand_word_t const & rhs
+        ) const noexcept
         { return lhs.cnt > rhs.cnt; }  // max-heap!
     }; 
 
@@ -29,7 +31,7 @@ public:
     explicit TCandMgr (candidates_t & cands, std::size_t const maxCandCnt = 64u)
     : m_impl{cands}
     , m_word_set{}
-    , m_max_sz{maxCandCnt}\
+    , m_max_sz{maxCandCnt}
     , m_best_cnt {0u}
     , m_cand_kind{ckFirstLvl}
     {
@@ -37,7 +39,7 @@ public:
         m_word_set.reserve(maxCandCnt);
     }
 
-    void set_kind (cand_kind_t const ck) { m_cand_kind = ck;}
+    void set_kind (cand_kind_t const ck) noexcept { m_cand_kind = ck;}
 
     template <typename TStr>
     bool insert (wdata_t const & wd, TStr && s, concat_inf_t const & drop)
@@ -333,7 +335,7 @@ private:
         , ::std::size_t const pos
     ) const;
 
-    float ReScore (word_t const & w, float sc, token_stat_t const ts) const
+    float ReScore (word_t const & w, float sc, token_stat_t const ts) const noexcept
     {
         /*
         float const gp = LangModel.CalcGram1Prob(w)

@@ -85,47 +85,47 @@ struct token_info_t
     explicit token_info_t(wstr_view_t const & txt
         , ofs_type const ofs = -1
         , len_type const l = 0u
-    )
+    ) noexcept
     : m_pTxt(txt.data()), m_stat{}, m_ofs{ofs}, m_len{l}
     {}
 
-    token_info_t () {};
+    token_info_t () noexcept {};
 
-    void reset (ofs_type const ofs, len_type const l) 
+    void reset (ofs_type const ofs, len_type const l)  noexcept
     {
         m_ofs = ofs;
         m_len = l;
     }
 
-    void assign(token_info_t const & rhs)
+    void assign(token_info_t const & rhs) noexcept
     {
         reset(rhs.m_ofs, rhs.m_len);
     }
 
-    wstr_view_t str() const
+    wstr_view_t str() const noexcept
     {
         return wstr_view_t {data(), m_len};
     }
 
-    constexpr wstr_view_t::const_pointer data() const 
+    constexpr wstr_view_t::const_pointer data() const  noexcept
     {
         return m_pTxt + m_ofs;
     }
 
-    constexpr bool empty () const {return !m_len;}
+    constexpr bool empty () const noexcept {return !m_len;}
 
-    constexpr wstr_view_t::value_type front () const 
+    constexpr wstr_view_t::value_type front () const noexcept
     {
         BOOST_ASSERT_MSG(m_pTxt, "Text must not be a nullptr!");
         return m_pTxt[m_ofs];
     }
 
-    constexpr ofs_type ofs () const {return m_ofs;}
-    constexpr ofs_type end_ofs () const {return m_ofs + m_len;}
-    constexpr len_type size () const {return m_len;}
+    constexpr ofs_type ofs () const noexcept {return m_ofs;}
+    constexpr ofs_type end_ofs () const noexcept {return m_ofs + m_len;}
+    constexpr len_type size () const noexcept {return m_len;}
 
-    token_stat_t const & stat() const {return m_stat;}
-    token_stat_t & stat() {return m_stat;}
+    token_stat_t const & stat() const noexcept {return m_stat;}
+    token_stat_t & stat() noexcept {return m_stat;}
     
 private:
 
@@ -138,7 +138,7 @@ private:
 
 ////////////////////////////////////////////////////////////////////////////////
 
-inline token_info_t const & GetToken(token_info_t const & ti) 
+inline token_info_t const & GetToken(token_info_t const & ti)  noexcept
 {
     return ti;
 }
@@ -157,10 +157,10 @@ using text_tokens_const_iterator_range_t
 std::string Tokens2Str (text_tokens_t const & tokens);
 #endif
 
-inline bool areSpaced(token_info_t const & lhs, token_info_t const & rhs)
+inline bool areSpaced(token_info_t const & lhs, token_info_t const & rhs) noexcept
 { return lhs.end_ofs() < rhs.ofs();}
 
-inline bool areNotSpaced(token_info_t const & lhs, token_info_t const & rhs)
+inline bool areNotSpaced(token_info_t const & lhs, token_info_t const & rhs) noexcept
 { return lhs.end_ofs() == rhs.ofs();}
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -170,7 +170,7 @@ struct wdata_t
     TWordId     id;
     TCount      cnt;
 
-    explicit wdata_t(word_id_t const i = word_id_t::Unknown, cnt_t const c = 0)
+    explicit wdata_t(word_id_t const i = word_id_t::Unknown, cnt_t const c = 0) noexcept
     :id{i}, cnt {c}
     {}
 
@@ -214,14 +214,14 @@ struct word_t: public wdata_t
     //: str{s}, cnt{0}, id{word_id_t::Unknown}
     //{}
 
-    void reset(wdata_t const & w)
+    void reset(wdata_t const & w) noexcept
     {
         static_cast<wdata_t &>(*this) = w;
     }
 
-    wdata_t const & wdata() const {return *this;}
+    wdata_t const & wdata() const noexcept {return *this;}
 
-    bool good() const {return is_word() && !str.empty();}
+    bool good() const noexcept {return is_word() && !str.empty();}
 
 };
 
@@ -238,7 +238,7 @@ using words_crange_t = boost::iterator_range<words_t::const_iterator>;
 
 struct orig_word_greater_by_cnt_t
 {
-    bool operator () (word_t const & w1, word_t const & w2) const
+    bool operator () (word_t const & w1, word_t const & w2) const noexcept
     { return w1.cnt > w2.cnt;}
 };
 
@@ -265,7 +265,7 @@ inline cand_kind_t NextLevel(cand_kind_t const ck)
 */
 
 template <typename TWIt>
-TWIt Advance2Next(TWIt beg, TWIt const & e)
+TWIt Advance2Next(TWIt beg, TWIt const & e) noexcept
 {
     while(++beg < e && (!IsWord(*beg)))
     {}    
@@ -278,7 +278,7 @@ struct concat_inf_t
 {
     concat_inf_t() = default;
 
-    concat_inf_t(::std::uint8_t const l, ::std::uint8_t const r)
+    concat_inf_t(::std::uint8_t const l, ::std::uint8_t const r) noexcept
     : left{l}, right{r}
     {}
 
@@ -408,7 +408,7 @@ inline token_info_t const & GetToken(cntxt_word_t const & cw)
     return cw.token;
 }
 
-void SortCandidates(cntxt_word_t & cw) noexcept;
+void SortCandidates(cntxt_word_t & cw);
 
 ////////////////////////////////////////////////////////////////////////////////
 

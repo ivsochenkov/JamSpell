@@ -105,7 +105,7 @@ class CDict
 
 public:
 
-    explicit CDict(TAlphabet const & alphbt)
+    explicit CDict(TAlphabet const & alphbt) noexcept
     : m_dict{}, m_alphabet{alphbt}
     {}
 
@@ -162,40 +162,43 @@ class TLangModel
         explicit TGramKey (TWordId const & n1 = TWordId::Unknown
             , TWordId const & n2 = TWordId::Unknown
             , TWordId const & n3 = TWordId::Unknown
-        ) 
+        ) noexcept
         : m_elems{n1, n2, n3} 
         {}
 
-        bool operator < (TGramKey const & rhs) const 
+        bool operator < (TGramKey const & rhs) const noexcept
         { return m_elems < rhs.m_elems; }
 
-        bool operator == (TGramKey const & rhs) const 
+        bool operator == (TGramKey const & rhs) const noexcept
         { return m_elems == rhs.m_elems; }
 
-        TWordId operator [] (unsigned i) const {return m_elems[i];}
-        TWordId & operator [] (unsigned i) {return m_elems[i];}
+        TWordId operator [] (unsigned i) const noexcept {return m_elems[i];}
+        TWordId & operator [] (unsigned i) noexcept {return m_elems[i];}
 
-        std::string_view bytes() const 
+        std::string_view bytes() const noexcept
         {
             return std::string_view(reinterpret_cast<const char*>(m_elems.data())
-                ,  to_underlying(kind()) * sizeof(m_elems[0])
+                ,  to_underlying(kind()) * sizeof(m_elems[0u])
             );
         }
 
-        inline ngram_type kind() const
+        inline ngram_type kind() const noexcept
         {
             short nt = to_underlying(ngram_type::nUndef);
-            for(auto i = m_elems.begin(); i != m_elems.end(); nt += (*i++ != TWordId::Unknown))
+            for(auto i = m_elems.begin()
+                ; i != m_elems.end()
+                ; nt += (*i++ != TWordId::Unknown)
+            )
             {}
             return ngram_type(nt);
         }
 
         using const_iterator = storage_type::const_iterator;
 
-        const_iterator begin () const {return m_elems.begin();}
-        const_iterator end () const { return begin() + to_underlying(kind()); }
+        const_iterator begin () const noexcept {return m_elems.begin();}
+        const_iterator end () const noexcept { return begin() + to_underlying(kind()); }
 
-        static std::underlying_type<ngram_type>::type to_underlying(ngram_type nt)
+        static std::underlying_type<ngram_type>::type to_underlying(ngram_type nt) noexcept
         {
             return static_cast<std::underlying_type<TGramKey::ngram_type>::type> (nt);
         }
@@ -213,7 +216,7 @@ class TLangModel
     static constexpr double MAX_REAL_NUM = 268435456;
     static constexpr double MAX_AVAILABLE_NUM = 65536;
     
-    static ::std::uint16_t PackInt32(uint32_t num) 
+    static ::std::uint16_t PackInt32(uint32_t num) noexcept
     {
         double r = double(num) / MAX_REAL_NUM;
         assert(r >= 0.0 && r <= 1.0);
@@ -222,7 +225,7 @@ class TLangModel
         return ::std::uint16_t(r);
     }
 
-    static ::std::uint32_t UnpackInt32(uint16_t num) 
+    static ::std::uint32_t UnpackInt32(uint16_t num) noexcept
     {
         double r = double(num) / MAX_AVAILABLE_NUM;
         //r = pow(r, 5.0);
@@ -261,7 +264,7 @@ public:
         , train_options_t const & tr_opt = train_options_t::ReadFromEnv()
     );
 
-    bool TokenIsBad(str_view_t const & alStr, token_stat_t const & ts) const
+    bool TokenIsBad(str_view_t const & alStr, token_stat_t const & ts) const noexcept
     {
         return (!ts.is_title_case)
             && (
@@ -295,9 +298,9 @@ public:
     bool Load(const std::string& modelFileName);
     void Clear();
 
-    std::size_t dict_size() const {return WordToId.size();}
+    std::size_t dict_size() const noexcept {return WordToId.size();}
     std::size_t avg_word_length(std::size_t max_probes = 10000u) const;
-    std::size_t total_word_occs() const {return TotalWords;}
+    std::size_t total_word_occs() const noexcept {return TotalWords;}
 
     
     TWordId UpdateWordIdIfPresent(str_view_t const & word, cnt_t const c = 1u)
@@ -332,7 +335,7 @@ public:
     void Text2Words(wstr_view_t const & txt, words_t & wrds) const;
     void Text2Words(wstr_view_t const & txt, context_t & cntxt) const;
 
-    uint64_t GetCheckSum() const {return CheckSum;}
+    uint64_t GetCheckSum() const noexcept {return CheckSum;}
 
     using dict_const_iterator = TWord2IdMap::const_iterator;
 
@@ -344,7 +347,7 @@ public:
         return 0.1 * ::std::exp(-wlen);
     }
 
-    double CalcGram1Prob(wdata_t const & winf) const
+    double CalcGram1Prob(wdata_t const & winf) const noexcept
     {
         //return (winf.cnt + K) / (TotalWords + VocabSize); // JS_CNT_FIX
         return (static_cast<double>(winf.cnt) + K) / (TotalWords); 
@@ -352,21 +355,21 @@ public:
     
     double CalcGram2Prob(wdata_t const & winf1
         , wdata_t const & winf2
-    ) const;
+    ) const noexcept;
 
     double Calc1StepGram2Prob(wdata_t const & winf1
         , wdata_t const & winf3
-    ) const;
+    ) const noexcept;
 
     double CalcGram3Prob(wdata_t const & winf1
         , wdata_t const & winf2
         , wdata_t const & winf3
-    ) const;
+    ) const noexcept;
     
     TCount GetGramHashCount(TGramKey const & key
         , TPerfectHash const & ph
         , buckets_type const & buckets
-    ) const
+    ) const noexcept
     {
         uint32_t const bucket = ph.Hash(key.bytes());
         assert(bucket < ph.BucketsNumber());

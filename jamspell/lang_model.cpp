@@ -86,14 +86,14 @@ struct TLangModel::TGramLoader
 {
     
     static inline std::underlying_type<TLangModel::TGramKey::ngram_type>::type 
-        to_underlying(TGramKey::ngram_type nt)
+        to_underlying(TGramKey::ngram_type nt) noexcept
     {
         return TGramKey::to_underlying(nt);
     }
 
     struct TGramKeyHash
     {
-        ::std::size_t operator()(const TLangModel::TGramKey& x) const 
+        ::std::size_t operator()(const TLangModel::TGramKey& x) const noexcept
         {
             ::std::size_t seed  = NJamSpell::to_underlying(x[0u]);
             boost::hash_combine(seed, x[1u]);
@@ -135,13 +135,13 @@ struct TLangModel::TGramLoader
         return m_tr_opt.ngram_thresholds[ to_underlying(ngr_kind) - 1 ];
     }
 
-    grams_type & grams() {return m_grams;}
+    grams_type & grams() noexcept {return m_grams;} 
 
     bool Train(const std::string& fName);
 
 private:
 
-    TAlphabet const & GetAlphabet() const 
+    TAlphabet const & GetAlphabet() const noexcept
     {
         return LM.Tokenizer.GetAlphabet();
     }
@@ -176,7 +176,7 @@ private:
 
     void CleanupVocabulary();
 
-    void ShiftLeft(TGramKey & gc)
+    static void ShiftLeft(TGramKey & gc) noexcept
     {
         gc[0] = gc[1];
         gc[1] = gc[2];
@@ -600,7 +600,7 @@ word_t TLangModel::LongestPrefixSearch(str_view_t const & word) const
 
 double TLangModel::CalcGram2Prob(wdata_t const & winf1
     , wdata_t const & winf2
-) const
+) const noexcept
 {
     double countsGram1 = winf1.cnt
         , countsGram2 = winf2.unknown() ? cnt_t{0} 
@@ -618,7 +618,7 @@ double TLangModel::CalcGram2Prob(wdata_t const & winf1
 
 double TLangModel::Calc1StepGram2Prob(wdata_t const & winf1
     , wdata_t const & winf3
-) const
+) const noexcept
 {
     double countsGram1 = winf1.cnt
         , countsGram2 = winf3.unknown() ? TCount{0} 
@@ -637,7 +637,7 @@ double TLangModel::Calc1StepGram2Prob(wdata_t const & winf1
 double TLangModel::CalcGram3Prob(wdata_t const & winf1
     , wdata_t const & winf2
     , wdata_t const & winf3
-) const 
+) const noexcept
 {
     double countsGram2 = winf2.unknown() ? TCount{0} 
         : GetGramHashCount(TGramKey(winf1.id, winf2.id), PerfectHash, Buckets)

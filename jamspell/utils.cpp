@@ -43,7 +43,7 @@ kindCV_t GetCVKind(wchar_t const c)
     return kindCV_t::cvkUndefined;
 }
 
-void SortCandidates(cntxt_word_t & cw) noexcept
+void SortCandidates(cntxt_word_t & cw)
 {
     std::sort(cw.candidates.begin(), cw.candidates.end()
         , [] (cand_word_t const & lhs, cand_word_t const & rhs)

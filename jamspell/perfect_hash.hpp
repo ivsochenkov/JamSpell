@@ -25,10 +25,17 @@ public:
     {return Init(r.begin(), r.end());}
 
     void Clear();
-    uint32_t Hash(const std::string& value) const;
-    uint32_t Hash(const char* value, size_t size) const;
-    uint32_t Hash(std::string_view const & sw) const {return Hash(sw.data(), sw.size());}
-    uint32_t BucketsNumber() const;
+    uint32_t Hash(const std::string& value) const noexcept;
+    uint32_t Hash(const char* value, size_t size) const noexcept;
+    uint32_t Hash(std::string_view const & sw) const noexcept 
+    {return Hash(sw.data(), sw.size());}
+
+    uint32_t BucketsNumber() const noexcept
+    {
+        const phf* p = (phf*)Phf;
+        return p->m;
+    }
+
 private:
 
     struct make_phf_string_t
