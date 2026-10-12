@@ -93,10 +93,13 @@ struct TLangModel::TGramLoader
 
     struct TGramKeyHash
     {
-        std::size_t operator()(const TLangModel::TGramKey& x) const 
+        ::std::size_t operator()(const TLangModel::TGramKey& x) const 
         {
-            //return std::hash<std::string_view>{}(x.bytes());
-            return boost::hash_range(x.begin(), x.end());
+            ::std::size_t seed  = NJamSpell::to_underlying(x[0u]);
+            boost::hash_combine(seed, x[1u]);
+            boost::hash_combine(seed, x[2u]);
+            return seed;
+            //return boost::hash_range(x.begin(), x.end());
         }
     };
 

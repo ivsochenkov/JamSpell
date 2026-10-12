@@ -24,7 +24,7 @@ namespace NJamSpell
 
 
 constexpr uint64_t LANG_MODEL_MAGIC_BYTE = 8559322735408079686L;
-constexpr uint16_t LANG_MODEL_VERSION = 2;
+constexpr uint16_t LANG_MODEL_VERSION = 3;
 constexpr double LANG_MODEL_DEFAULT_K = 0.01;
 
 using str_to_id_map_t = tsl::htrie_map<char, wdata_t
@@ -202,11 +202,6 @@ class TLangModel
 
       private:
 
-        static void inc(TGramKey::ngram_type & nt, bool v) 
-        {
-            nt = TGramKey::ngram_type( to_underlying(nt) + v );
-        }
-
         storage_type    m_elems;
 
     };
@@ -224,7 +219,7 @@ class TLangModel
         assert(r >= 0.0 && r <= 1.0);
         r = pow(r, 0.2);
         r *= MAX_AVAILABLE_NUM;
-        return uint16_t(r);
+        return ::std::uint16_t(r);
     }
 
     static ::std::uint32_t UnpackInt32(uint16_t num) 
@@ -233,7 +228,7 @@ class TLangModel
         //r = pow(r, 5.0);
         r = r * r * r * r * r;
         r *= MAX_REAL_NUM;
-        return uint32_t(::std::ceil(r));
+        return ::std::uint32_t(::std::ceil(r));
     }
 
     template<typename T>
