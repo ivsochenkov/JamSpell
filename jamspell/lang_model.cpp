@@ -190,10 +190,8 @@ TLangModel::TGramLoader::TGramLoader(TLangModel & lm
 , m_tr_opt{tr_opt}
 , trainText_size{0}, sentences_size{0}
 {
-    //LM.WordToId.reserve (m_tr_opt.max_grams_sz / 3);
-    //m_grams.reserve(m_tr_opt.max_grams_sz * m_tr_opt.growth_factor);
-    m_grams.reserve(m_tr_opt.max_grams_sz * 1.002);  // some reserve
-    
+    //LM.WordToId.reserve (m_tr_opt.max_dict_size);
+    m_grams.reserve(m_tr_opt.max_grams_sz * 1.002);  // some reserve    
 }
 
 
@@ -321,25 +319,24 @@ void TLangModel::TGramLoader::FillGramms(text_tokens_iterator_t b
             
             ++LM.TotalWords;
 
-            if (c > 0)
+            switch (c)
             {
-                m_grams[TGramKey(gram_key[0], gram_key[1])] += 1u;
-            }
-            if(c > 1)
-            {                
-                m_grams[gram_key] += 1;
-                m_grams[TGramKey(gram_key[0], TWordId::Any, gram_key[2])] += 1u;
-                ShiftLeft(gram_key);
+                case 2u:
+                {
+                    ++m_grams[gram_key];
+                    ++m_grams[TGramKey(gram_key[0u], TWordId::Any, gram_key[2u])];
+                    ShiftLeft(gram_key);
+                    // no break!
+                }
+                case 1u:
+                {
+                    ++m_grams[TGramKey(gram_key[0u], gram_key[1u])];
+                }               
+        
             }
             c += (c < 2);   // NOTE: Must be here! Not in cycle due to continue 
                             // statement above
         }
-        
-        if(c > 1) // note! Due to Shift left above we need to add shifted pair of ids!
-        {
-            m_grams[TGramKey(gram_key[0], gram_key[1])] += 1u;
-        }
-        
         //gram_key = TGramKey{};    // Not needed
     }
     
@@ -412,11 +409,10 @@ void TLangModel::TGramLoader::CleanupVocabulary()
             )  ? ++it : it = LM.WordToId.erase(it)
     )
     {
-        if((++cnt) % 1000 == 0)
+        if((++cnt) % 10000 == 0)
         {
             PrintDictStatus(lastTime, float(cnt) / dsz);
         }
-
     }     
 
     std::cerr << "++[info] done cleanup vocabulary... size = " 
