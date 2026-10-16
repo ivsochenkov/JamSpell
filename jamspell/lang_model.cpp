@@ -17,7 +17,7 @@
 #include "lang_model.hpp"
 
 #include <contrib/cityhash/city.h>
-#include <contrib/tsl/robin_map.h>
+#include <contrib/tsl/hopscotch_map.h>
 
 #ifndef ssize_t
 #define ssize_t int
@@ -83,17 +83,20 @@ TLangModel::train_options_t TLangModel::train_options_t::ReadFromEnv()
     return opt;
 }
 
+inline std::underlying_type<TLangModel::TGramKey::ngram_kind_t>::type 
+    to_underlying(TLangModel::TGramKey::ngram_kind_t nt) noexcept
+{
+    return TLangModel::TGramKey::to_underlying(nt);
+}
+
+
 struct TLangModel::TGramLoader 
 {
     
-    static inline std::underlying_type<TLangModel::TGramKey::ngram_type>::type 
-        to_underlying(TGramKey::ngram_type nt) noexcept
-    {
-        return TGramKey::to_underlying(nt);
-    }
-
+    
     struct TGramKeyHash
     {
+        /*
         ::std::size_t operator()(const TLangModel::TGramKey& x) const noexcept
         {
             ::std::size_t seed  = ::boost::hash_value(x[2u]);
@@ -101,15 +104,33 @@ struct TLangModel::TGramLoader
             boost::hash_combine(seed, NJamSpell::to_underlying(x[0u]));
             return seed;
         }
+        */
+        static ::std::uint64_t splitmix64(::std::uint64_t x) noexcept 
+        {
+            x += 0x9e3779b97f4a7c15ULL;
+            x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+            x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+            return x ^ (x >> 31);
+        }
+
+        ::std::size_t operator()(TGramKey const & k) const noexcept 
+        {
+            ::std::uint64_t x = to_underlying(k[2u]);
+            x = x * 0x9e3779b97f4a7c15ULL + to_underlying(k[1u]);
+            x = x * 0x9e3779b97f4a7c15ULL + to_underlying(k[0u]);
+            return static_cast<::std::size_t>(splitmix64(x));
+        }
+
     };
 
-    using grams_type = tsl::robin_map<TGramKey, TCount
+    using grams_type = tsl::hopscotch_map<TGramKey, TCount
         , TGramKeyHash
         , std::equal_to<TGramKey>
         , std::allocator<std::pair<TGramKey, TCount> >
+        , 62 // NeighborhoodSize
         , false // store hash
         //, tsl::rh::mod_growth_policy<std::ratio<11, 10> >
-        , tsl::ah::prime_growth_policy
+        , tsl::hh::prime_growth_policy
     >;
 
     using word_id_set_type = ::boost::dynamic_bitset<>;
@@ -140,9 +161,9 @@ struct TLangModel::TGramLoader
         return m_dict.Load(dictFNam);
     }
 
-    unsigned get_threshold(TGramKey::ngram_type ngr_kind) const 
+    unsigned get_threshold(TGramKey::ngram_kind_t ngr_kind) const 
     { 
-        assert (ngr_kind != TGramKey::ngram_type::nUndef);
+        assert (ngr_kind != TGramKey::ngram_kind_t::nUndef);
         return m_tr_opt.ngram_thresholds[ to_underlying(ngr_kind) - 1 ];
     }
 
@@ -406,7 +427,7 @@ void TLangModel::TGramLoader::Reduce ()
         ; ++cnt
     ) 
     {
-        TGramKey::ngram_type const nt = it -> first.kind();
+        TGramKey::ngram_kind_t const nt = it -> first.kind();
         if (    ( it -> second >= get_threshold(nt) )
             //&&  ((!vocab_cleaned) || NGramIsInDict(wids, it ->first) )
         )
@@ -451,7 +472,7 @@ void TLangModel::TGramLoader::CleanupVocabulary()
 
     std::cerr << "++[info] cleanup vocabulary... size = " << dsz << std::endl;
 
-    unsigned const thres {get_threshold(TGramKey::ngram_type::nGram1)};
+    unsigned const thres {get_threshold(TGramKey::ngram_kind_t::nGram1)};
 
     ::std::uint64_t lastTime = GetCurrentTimeMs();    
     for (auto it = m_str_map.begin()

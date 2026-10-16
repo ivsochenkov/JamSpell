@@ -145,13 +145,14 @@ private:
 
 class TLangModel 
 {
+public:
     class TGramKey 
     {
         using storage_type = std::array<TWordId, 3>;
 
       public:
 
-        enum class ngram_type : unsigned char 
+        enum class ngram_kind_t : unsigned char 
         {            
                 nUndef      = 0    
             ,   nGram1
@@ -189,13 +190,13 @@ class TLangModel
             );
         }
         
-        inline ngram_type kind() const noexcept
+        inline ngram_kind_t kind() const noexcept
         {
-            short nt = to_underlying(ngram_type::nUndef);
+            short nt = to_underlying(ngram_kind_t::nUndef);
             nt += (m_elems[0u] != TWordId::Unknown);
             nt += (m_elems[1u] != TWordId::Unknown);
             nt += (m_elems[2u] != TWordId::Unknown);
-            return ngram_type(nt);
+            return ngram_kind_t(nt);
         }        
 
         using const_iterator = storage_type::const_iterator;
@@ -203,9 +204,9 @@ class TLangModel
         const_iterator begin () const noexcept {return m_elems.begin();}
         const_iterator end () const noexcept { return begin() + to_underlying(kind()); }
 
-        static std::underlying_type<ngram_type>::type to_underlying(ngram_type nt) noexcept
+        static std::underlying_type<ngram_kind_t>::type to_underlying(ngram_kind_t nt) noexcept
         {
-            return static_cast<std::underlying_type<TGramKey::ngram_type>::type> (nt);
+            return static_cast<std::underlying_type<TGramKey::ngram_kind_t>::type> (nt);
         }
 
       private:
@@ -214,6 +215,7 @@ class TLangModel
 
     };
 
+private:
     struct TGramLoader ;    
 
     using buckets_type = ::std::vector<std::pair<::std::uint16_t, ::std::uint16_t>> ;
