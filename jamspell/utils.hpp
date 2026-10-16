@@ -4,6 +4,8 @@
 
 #include <contrib/handypack/handypack.hpp>
 
+#include <contrib/cityhash/city.h>
+
 #include <boost/range/iterator_range.hpp>
 
 #include <boost/container/string.hpp>
@@ -25,10 +27,16 @@
 #define JS_TRACE_MSG(arg) 
 #endif
 
+#if defined(JS_TRACE_TRAIN)
+#define JS_TRACE_TRAIN_SRC_MSG(arg) arg
+#else
+#define JS_TRACE_TRAIN_SRC_MSG(arg) 
+#endif
+
 namespace NJamSpell 
 {
 
-enum class TWordId : uint32_t 
+enum class TWordId : ::std:: uint32_t 
 {
       Any     = std::numeric_limits<std::underlying_type<TWordId>::type>::min()
     , Unknown = std::numeric_limits<std::underlying_type<TWordId>::type>::max()
@@ -483,16 +491,18 @@ inline wchar_t MakeUpperIfRequired(wchar_t const orig, wchar_t const sample)
     // return (MakeUpper(sample) == sample) ? MakeUpper(orig) : orig;
 }
 
-inline str_view_t Remap(str_view_t const & atxt
-    , wstr_view_t const & orig_txt
-    , wstr_view_t const & orig_word
-)
+struct str_hasher_t
 {
-    return str_view_t(
-            atxt.data() + std::distance(orig_txt.data(), orig_word.data())
-        ,   orig_word.size()
-    );
-}
+    ::std::size_t operator () (str_view_t const & sw) const noexcept
+    {
+        return CityHash64(sw.begin(), sw.size());
+    }
+
+    ::std::size_t operator () (const char* k, std::size_t const s) const noexcept
+    {
+        return CityHash64(k, s);
+    }
+};
 
 uint16_t CityHash16(const std::string& str);
 uint16_t CityHash16(const char* str, size_t size);

@@ -24,11 +24,11 @@ namespace NJamSpell
 
 
 constexpr uint64_t LANG_MODEL_MAGIC_BYTE = 8559322735408079686L;
-constexpr uint16_t LANG_MODEL_VERSION = 3;
+constexpr uint16_t LANG_MODEL_VERSION = 4;
 constexpr double LANG_MODEL_DEFAULT_K = 0.01;
 
 using str_to_id_map_t = tsl::htrie_map<char, wdata_t
-    , tsl::ah::str_hash<char>
+    , str_hasher_t
     , std::uint8_t
 >;
 
@@ -96,7 +96,7 @@ public:
 class CDict
 {
     using dict_impl_type = tsl::array_map<char, dict_info_t
-        , tsl::ah::str_hash<char>
+        , str_hasher_t
         , tsl::ah::str_equal<char>
         , false, std::uint8_t
         , std::uint32_t
@@ -166,11 +166,18 @@ class TLangModel
         : m_elems{n1, n2, n3} 
         {}
 
+        /*
         bool operator < (TGramKey const & rhs) const noexcept
         { return m_elems < rhs.m_elems; }
 
+        */
+
         bool operator == (TGramKey const & rhs) const noexcept
-        { return m_elems == rhs.m_elems; }
+        { 
+            return m_elems[0u] == rhs.m_elems[0u] 
+                && m_elems[1u] == rhs.m_elems[1u]
+                && m_elems[2u] == rhs.m_elems[2u];
+        }
 
         TWordId operator [] (unsigned i) const noexcept {return m_elems[i];}
         TWordId & operator [] (unsigned i) noexcept {return m_elems[i];}
@@ -181,17 +188,15 @@ class TLangModel
                 ,  to_underlying(kind()) * sizeof(m_elems[0u])
             );
         }
-
+        
         inline ngram_type kind() const noexcept
         {
             short nt = to_underlying(ngram_type::nUndef);
-            for(auto i = m_elems.begin()
-                ; i != m_elems.end()
-                ; nt += (*i++ != TWordId::Unknown)
-            )
-            {}
+            nt += (m_elems[0u] != TWordId::Unknown);
+            nt += (m_elems[1u] != TWordId::Unknown);
+            nt += (m_elems[2u] != TWordId::Unknown);
             return ngram_type(nt);
-        }
+        }        
 
         using const_iterator = storage_type::const_iterator;
 
@@ -211,7 +216,7 @@ class TLangModel
 
     struct TGramLoader ;    
 
-    using buckets_type = std::vector<std::pair<::std::uint16_t, ::std::uint16_t>> ;
+    using buckets_type = ::std::vector<std::pair<::std::uint16_t, ::std::uint16_t>> ;
 
     static constexpr double MAX_REAL_NUM = 268435456;
     static constexpr double MAX_AVAILABLE_NUM = 65536;
@@ -247,7 +252,8 @@ public:
         using thresholds_type = std::array<unsigned short, 3>;
 
         std::size_t             max_grams_sz        = 100000000u
-                            ,   max_dict_size       = 5000000u;
+                            ,   max_dict_size       = 5000000u
+                            ,   languages_cnt       = 2u
                             ;
         thresholds_type         ngram_thresholds    = {7u, 5u, 3u};
 
@@ -270,8 +276,8 @@ public:
             && (
                     (alStr.size() >= 2 && ts.consonant_cnt == alStr.size())
                 ||  (alStr.size() > 3 && ts.vowel_cnt == alStr.size())
-                ||  ts.max_consonant_in_row > 7
-                ||  ts.max_vovel_in_row > 5
+                ||  ts.max_consonant_in_row > 7u
+                ||  ts.max_vovel_in_row > 5u
                );
     }
 
@@ -301,24 +307,6 @@ public:
     std::size_t dict_size() const noexcept {return WordToId.size();}
     std::size_t avg_word_length(std::size_t max_probes = 10000u) const;
     std::size_t total_word_occs() const noexcept {return TotalWords;}
-
-    
-    TWordId UpdateWordIdIfPresent(str_view_t const & word, cnt_t const c = 1u)
-    {
-        assert(!word.empty());
-        auto i = WordToId.find(word);
-        return (i != WordToId.end()) ? (i.value().cnt += c, i.value().id) 
-            : TWordId::Unknown;
-    }   
-
-    TWordId UpdateWordId(str_view_t const & word, cnt_t const c = 1u)
-    {
-        assert(!word.empty());
-        auto insR = WordToId.emplace(word, wdata_t{TWordId (LastWordID), 0u} );
-        insR.first.value().cnt += c;
-        LastWordID += insR.second;
-        return insR.first.value().id;
-    }
 
     TWordId GetWordId(str_view_t const & word) const
     {
@@ -378,26 +366,30 @@ public:
     }
 
 
-    HANDYPACK(WordToId, LastWordID, TotalWords, VocabSize,
-              PerfectHash, Buckets, Tokenizer, CheckSum)
+    HANDYPACK(WordToId, TotalWords, VocabSize, K, LastWordID
+              , PerfectHash, Buckets, Tokenizer, CheckSum)
 private:
 
     bool InitWordFromToken(token_info_t & tinf, word_t & w) const;
 
-    
-    //const TWordId UnknownWordId = std::numeric_limits<TWordId>::max();
-    double K = LANG_MODEL_DEFAULT_K;
-    //TRobinHash WordToId;
     TWord2IdMap                         WordToId;
-    //std::vector<const std::wstring*> IdToWord;
-    std::underlying_type<TWordId>::type LastWordID = to_underlying(TWordId::Any) + 1u, 
-                                        TotalWords = 0,
-                                        VocabSize = 0;
+    
+    std::size_t                         TotalWords = 0
+                                    ,   VocabSize = 0
+                                    ;
 
-    TTokenizer                  Tokenizer;
-    buckets_type                Buckets;
-    TPerfectHash                PerfectHash;
-    uint64_t                    CheckSum;
+    double                              K = LANG_MODEL_DEFAULT_K;
+
+    std::underlying_type<TWordId>::type LastWordID = to_underlying(TWordId::Any) + 1u
+                                        ;
+
+    TTokenizer                          Tokenizer;
+    
+    TPerfectHash                        PerfectHash;
+    buckets_type                        Buckets;
+
+    ::std::uint64_t                     CheckSum;
+    
 };
 
 ////////////////////////////////////////////////////////////////////////////////

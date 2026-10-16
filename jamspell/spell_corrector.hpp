@@ -101,9 +101,9 @@ public:
 
     struct opt_t
     {
-        double      OrigWordIsKnownPenalty      = 18.0   // 20   
-                ,   OrigWordIsUnknownPenalty    = 5.0  // 5    
-                ,   SecondLvlPenFactor          = 20.0       // 50
+        double      OrigWordIsKnownPenalty      = 18.0      
+                ,   OrigWordIsUnknownPenalty    = 5.0      
+                ,   SecondLvlPenFactor          = 20.0       
                 ,   SecondLvlPenalty            = 10.0       
                 ,   SwitchedWordPenalty         = 3.0
                 ,   SwitchedWordIsKnownPenalty  = 15.0
@@ -115,8 +115,8 @@ public:
                 ; 
             ;
 
-        ::std::size_t         MaxCandidatesToCheck = 64
-                            , InFreqWordCntThreshold = 300 
+        ::std::size_t         MaxCandidatesToCheck = 64u
+                            , InFreqWordCntThreshold = 300u
         ;
 
         static opt_t ReadFromEnv();
