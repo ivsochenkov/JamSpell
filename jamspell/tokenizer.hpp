@@ -60,16 +60,7 @@ public:
    состоящее из 189 819 букв.
 */
 
-    static inline bool isSoftSentEnd(wchar_t const ch) noexcept
-    { 
-        return ch == L'.' || ch == 0x2026; // "..."
-    }
-
-    static inline bool isHardSentEnd(wchar_t const ch) noexcept
-    { return ch == L'!' || ch == L'?'; }
-
-    bool isCapitalLetter(wchar_t const wch)const 
-    {return std::isupper(wch, Locale);}
+    
 
 private:
 
@@ -110,10 +101,6 @@ public:
     static constexpr std::size_t get_approx_word_cnt(std::size_t const txt_sz) noexcept
     { return 1u + txt_sz / avg_word_len;}
 
-    TTokenizer();
-
-    explicit TTokenizer(wchar_t const * delims);
-
     bool LoadAlphabet(const std::string& alphabetFile);
 
     text_tokens_t Parse(wstr_view_t const & txt
@@ -128,6 +115,14 @@ public:
 
     void Filter4Train(text_tokens_t & tokens) const;
 
+    static bool isSoftSentEnd(wchar_t const ch) noexcept
+    { 
+        return ch == L'.' || ch == 0x2026; // "..."
+    }
+
+    static bool isHardSentEnd(wchar_t const ch) noexcept
+    { return ch == L'!' || ch == L'?'; }
+
     template <typename TTokenIt>
     bool isSentBreak(TTokenIt const curr_tok_it, TTokenIt const e) const 
     {
@@ -137,7 +132,7 @@ public:
         return isHardSentEnd(curr_wch) 
             || (isSoftSentEnd(curr_wch)
                 &&  (    next == e 
-                    || (isCapitalLetter(GetToken(*next).front()) 
+                    || (Alphabet.isUpper(GetToken(*next).front()) 
                         && ( areSpaced(GetToken(*curr_tok_it), GetToken(*next))) 
                        )
                     )
@@ -151,17 +146,12 @@ public:
             );
     }
 
-    bool isPunct (wchar_t const ch) const
-    {
-        return std::ispunct(ch, Locale);
-    }
-
     static bool isA(wchar_t const ch, wchar_t const * chrs) noexcept;    
 
     bool isWordToken (token_info_t const & token) const
     {
         return (!token.empty()) && (token.size() < max_word_length) 
-            && (!isPunct(token.front()));
+            && (!Alphabet.isPunct(token.front()));
     }
 
     bool isGoodWordToken (token_info_t const & token) const 
@@ -180,8 +170,6 @@ public:
 private:
 
     alphabet_type Alphabet;
-    std::locale Locale;
-
 
 };
 

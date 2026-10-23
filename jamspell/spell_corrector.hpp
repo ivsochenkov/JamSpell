@@ -306,15 +306,17 @@ private:
         , cand_word_t & cnd
     ) const;
 
-    float ScoreOrig(fix_attrs_t const & fixa
+    void ScoreOrig(fix_attrs_t const & fixa
         , context_range_t const & cntxt
         , ::std::size_t const pos
     ) const;
 
-    float ReScore (word_t const & w, float sc, token_stat_t const ts) const noexcept
+    void ReScore (cand_word_t & w, token_stat_t const ts) const noexcept
     {
-        sc -= LangModel.TokenIsBad(w.str, ts)  *  m_opt.BadTokenPenalty;
-        return sc;
+        w.score -= m_opt.BadTokenPenalty * (
+            LangModel.TokenIsBad(w.str, ts) ||
+            w.concat.left > 1u || w.concat.right > 2u
+        );
     }
 
     TLangModel                      LangModel;

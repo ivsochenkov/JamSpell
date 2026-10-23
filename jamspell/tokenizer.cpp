@@ -85,15 +85,6 @@ TTokenizer::Tokenize(wstr_view_t const & txt, sep_type const & sep) const
     return tokenizer_type(txt.begin(), txt.end(), sep);
 }
 
-TTokenizer::TTokenizer()
-    : Locale(GetLocale () )
-{
-}
-
-TTokenizer::TTokenizer(wchar_t const * delims)
-    : Locale(GetLocale () )
-{
-}
 
 bool TTokenizer::LoadAlphabet(const std::string& alphabetFile) 
 {

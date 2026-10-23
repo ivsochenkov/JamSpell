@@ -242,13 +242,13 @@ concat_inf_t TSpellCorrector::PeelWord(token_info_t & tinf) const
     concat_inf_t cinf;
     wstr_view_t ts = tinf.str();
     for (auto i = ts.begin()
-        ; (i != ts.end()) && GetTokenizer().isPunct(*i) 
+        ; (i != ts.end()) && GetAlphabet().isPunct(*i) 
         ; ++i, ++cinf.left 
     )
     {}
 
     for (auto i = ts.rbegin()
-        ; (i != ts.rend()) && GetTokenizer().isPunct(*i) 
+        ; (i != ts.rend()) && GetAlphabet().isPunct(*i) 
         ; ++i, ++cinf.right 
     )
     {}
@@ -328,7 +328,7 @@ bool TSpellCorrector::isSentEnd(context_t::iterator b
     return (b == e)
     || TTokenizer::isHardSentEnd(tb) 
     || (TTokenizer::isSoftSentEnd(tb)
-        &&  (GetTokenizer().isCapitalLetter(b -> token.front()) )            
+        &&  (GetAlphabet().isUpper(b -> token.front()) )
        ); // LISPanyk is happy! =)
 }
 
@@ -377,7 +377,7 @@ void TSpellCorrector::FormCandidates(context_range_t const & context
     }
     
     cw.attrs.orig_is_known = !ow.unknown();    
-    ow.score = ScoreOrig(fix_attrs, context, position);
+    ScoreOrig(fix_attrs, context, position);
     str_view_t const ow_str = cw.get_peeled();
 
     JS_TRACE_MSG(std::cerr << "[debug] Scored orig: \'" 
@@ -943,22 +943,21 @@ TSpellCorrector
 
     token_stat_t ts {GetAlphabet().CalcTokenStat(cnd.str)};
     ts.is_title_case = ctx_word.token.stat().is_title_case;
-    cnd.score = ReScore(cnd, cnd.score, ts);
+    ReScore(cnd, ts);
     cnd.score -= std::abs(long(cnd.str.size()) - ctx_word.token.size()) 
         * m_opt.LengthMismatchPenaltyFactor;
 }
 
-float TSpellCorrector::ScoreOrig(fix_attrs_t const & fixa
+void TSpellCorrector::ScoreOrig(fix_attrs_t const & fixa
     , context_range_t const & cntxt
     , ::std::size_t const pos
 ) const
 {
-    cntxt_word_t const & cw = cntxt[pos];
+    cntxt_word_t & cw = cntxt[pos];
     float sc = LangModel.Score(GetSentenceRange(cntxt, pos)); 
-    sc = ReScore(cw.orig_word, sc, cw.token.stat());
-    sc -= (!fixa.sw_cnt) * m_opt.SwitchedWordPenalty;
-    sc -= (cw.concat.left + cw.concat.right) * m_opt.LengthMismatchPenaltyFactor;
-    return sc;
+    ReScore(cw.orig_word, cw.token.stat());
+    cw.orig_word.score -= (!fixa.sw_cnt) * m_opt.SwitchedWordPenalty;
+    cw.orig_word.score -= cw.concat.left * m_opt.LengthMismatchPenaltyFactor;
 }
 
 

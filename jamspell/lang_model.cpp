@@ -728,10 +728,10 @@ double TLangModel::CalcGram3Prob(wdata_t const & winf1
 bool TLangModel::InitWordFromToken(token_info_t & tinf, word_t & w) const
 {    
     if(tinf.size() < MAX_WORD_LENGTH * 2u   // concat of two longest words!!!
-        && ToAlphabet(Tokenizer.GetAlphabet(), tinf.str(), w.str, tinf.stat())
+        && ToAlphabet(GetAlphabet(), tinf.str(), w.str, tinf.stat())
     )
     {   
-        if(tinf.size() == 1 && Tokenizer.isPunct(tinf.str().front()))
+        if(tinf.size() == 1 && GetAlphabet().isPunct(tinf.str().front()))
         {
             w.id = word_id_t::Any;
         }                         

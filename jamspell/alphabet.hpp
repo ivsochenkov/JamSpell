@@ -39,6 +39,10 @@ public:
 
     static bool isIgnorable (letter_type const chr) ;
 
+    TAlphabet () : Locale(GetLocale()) {}
+
+    ::std::locale const & getLocale() const noexcept {return Locale;}
+
 private:
 
     struct switch_t
@@ -130,6 +134,21 @@ public:
 
     token_stat_t CalcTokenStat(str_view_t const & s) const;
 
+    bool isPunct (wchar_t const ch) const
+    {
+        return ::std::ispunct(ch, Locale);
+    }
+
+    bool isDigit (wchar_t const ch) const
+    {
+        return ::std::isdigit(ch, Locale);
+    }
+
+    bool isUpper (wchar_t const ch) const
+    {
+        return ::std::isupper(ch, Locale);
+    }
+
 private:
 
     using impl_type = std::vector<letter_info_t>;
@@ -160,10 +179,12 @@ public:
 
 private:
 
+    std::locale         Locale;
+
     impl_type           m_letters;
     punto_switch_type   m_switches;
     subs_map_type       m_subst;
-    subs_type           m_all;
+    subs_type           m_all;    
 
 };
 

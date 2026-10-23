@@ -141,11 +141,11 @@ struct stat_counter_t
         ts.consonant_cnt += is_cons;
     }
 
-    void operator () (wchar_t const wch, ::std::locale const & l) 
+    void operator () (wchar_t const wch) 
     {
-        if(!::std::isdigit(wch, l))
+        if(!m_alphabet.isPunct(wch) && ! m_alphabet.isDigit(wch))
         {
-            ts.is_title_case &= ::std::isupper(wch, l);
+            ts.is_title_case &= m_alphabet.isUpper(wch);
         }
     }
 
@@ -294,8 +294,6 @@ bool ToAlphabet(TAlphabet const & alphabet
     , token_stat_t & ts
 )
 {
-    auto const & curr_loc = GetLocale();
-
     stat_counter_t sttcntr(alphabet, true);
     res.resize(src.size(), '\0');
     auto tgt = res.begin();
@@ -310,7 +308,7 @@ bool ToAlphabet(TAlphabet const & alphabet
             return false;
         }
         sttcntr(*tgt);
-        sttcntr(src_ch, curr_loc);
+        sttcntr(src_ch);
     }
     ts = sttcntr.get();
     return true; 
