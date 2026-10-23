@@ -128,6 +128,12 @@ struct token_info_t
         return m_pTxt[m_ofs];
     }
 
+    constexpr wstr_view_t::value_type back () const noexcept
+    {
+        BOOST_ASSERT_MSG(m_pTxt, "Text must not be a nullptr!");
+        return m_pTxt[end_ofs() - 1];
+    }
+
     constexpr ofs_type ofs () const noexcept {return m_ofs;}
     constexpr ofs_type end_ofs () const noexcept {return m_ofs + m_len;}
     constexpr len_type size () const noexcept {return m_len;}
@@ -261,8 +267,6 @@ enum cand_kind_t : unsigned char
     ,   ckSecondLvl
     ,   ckFirstLvlSw 
     ,   ckSecondLvlSw
-    ,   ckFirstLvlFrgmt
-    ,   ckSecondLvlFrgmt
 };
 
 /*
@@ -287,8 +291,11 @@ struct concat_inf_t
     concat_inf_t() = default;
 
     concat_inf_t(::std::uint8_t const l, ::std::uint8_t const r) noexcept
-    : left{l}, right{r}
+    : left{l}, right{r} 
     {}
+
+    explicit operator bool () const noexcept {return left || right;}
+    ::std::size_t size() const noexcept {return ::std::size_t(left) + right;}
 
     ::std::uint8_t          left = 0u, right = 0u;
 };
@@ -341,7 +348,7 @@ using candidates_crange_t = boost::iterator_range<candidates_t::const_iterator>;
 struct cntxt_attr_t
 {
     bool                sw_orig_is_known    = false
-                    ,   prev_was_switched   = false
+                    ,   orig_is_known       = false
                     ;
 };
 
@@ -378,7 +385,13 @@ struct cntxt_word_t
 
     bool changed() const noexcept {return get_best_cand().kind != orig_word.kind;}
 
-    bool has_non_spaced() const noexcept {return concat.left || concat.right;}
+    str_view_t get_peeled() const 
+    {
+        str_view_t s = orig_word.str;
+        s.remove_prefix(concat.left);
+        s.remove_suffix(concat.right);
+        return s;
+    }
 
     candidates_t        candidates;
     cand_ref_t          best_cand;

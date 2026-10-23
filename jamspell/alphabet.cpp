@@ -108,14 +108,17 @@ TAlphabet::letter_type TAlphabet::GetSwitched(char const ch) const
     return ( i != m_switches.end() &&  i -> switched == ch) ? i -> real : ch;
 }
 
-token_stat_t TAlphabet::CalcTokenStat(str_view_t const & s) const
-{    
-    token_stat_t ts;
+struct stat_counter_t
+{
+    explicit stat_counter_t (TAlphabet const & a, bool is_ttl_case = false) noexcept
+    : m_alphabet(a)
+    {
+        ts.is_title_case = is_ttl_case;
+    }
 
-    std::uint8_t vow_in_row = 0u, cons_in_row = 0;
-    for(char const c : s)
-    {        
-        kindCV_t const cvk = GetLetterKind(c);
+    void operator () (char const c) noexcept
+    {
+        kindCV_t const cvk = m_alphabet.GetLetterKind(c);
         bool const  is_vow = (cvk == kindCV_t::cvkVowel),
                     is_cons = (cvk == kindCV_t::cvkConsonant)
         ;
@@ -136,11 +139,41 @@ token_stat_t TAlphabet::CalcTokenStat(str_view_t const & s) const
 
         ts.vowel_cnt += is_vow;
         ts.consonant_cnt += is_cons;
-
     }
-    ts.max_consonant_in_row = std::max(ts.max_consonant_in_row, cons_in_row);
-    ts.max_vovel_in_row = std::max(ts.max_vovel_in_row, vow_in_row);   
-    return ts;
+
+    void operator () (wchar_t const wch, ::std::locale const & l) 
+    {
+        if(!::std::isdigit(wch, l))
+        {
+            ts.is_title_case &= ::std::isupper(wch, l);
+        }
+    }
+
+    token_stat_t get() noexcept
+    {
+        ts.max_consonant_in_row = std::max(ts.max_consonant_in_row, cons_in_row);
+        ts.max_vovel_in_row = std::max(ts.max_vovel_in_row, vow_in_row); 
+        return ts; 
+    }
+
+private:
+
+    TAlphabet const & m_alphabet;
+
+    token_stat_t ts;
+    std::uint8_t vow_in_row = 0u, cons_in_row = 0;
+};
+
+
+token_stat_t TAlphabet::CalcTokenStat(str_view_t const & s) const
+{ 
+    stat_counter_t scntr(*this);
+    for(char const c : s)
+    {      
+        scntr(c);
+    }
+     
+    return scntr.get();
 }
 
 void TAlphabet::LoadLines(strings_type const & lines )
@@ -236,18 +269,6 @@ void TAlphabet::FinalizeSubst(subs_type & subs)
     subs.resize(std::distance(subs.begin(), std::unique(subs.begin(), subs.end())));
 }
 
-/*
-bool WellFormedInAlphabet(str_view_t & src)
-{
-    for(char c : src)
-    {
-        if(!c)
-            return false;
-    }
-    return true;
-}
-
-*/
 
 bool ToAlphabet(TAlphabet const & alphabet
     , wstr_view_t const & src
@@ -275,9 +296,7 @@ bool ToAlphabet(TAlphabet const & alphabet
 {
     auto const & curr_loc = GetLocale();
 
-    ts.is_title_case = true;
-
-    std::uint8_t vow_in_row = 0u, cons_in_row = 0;
+    stat_counter_t sttcntr(alphabet, true);
     res.resize(src.size(), '\0');
     auto tgt = res.begin();
     for(auto it = src.begin(), e = src.end(); it != e; ++tgt, ++it)
@@ -287,38 +306,13 @@ bool ToAlphabet(TAlphabet const & alphabet
         if(*tgt == TAlphabet::UniversalCh)
         {
             res.clear();
+            ts = token_stat_t{};
             return false;
         }
-        kindCV_t const cvk = alphabet.GetLetterKind(*tgt);
-        bool const  is_vow = (cvk == kindCV_t::cvkVowel),
-                    is_cons = (cvk == kindCV_t::cvkConsonant)
-        ;
-
-        if(!is_vow)
-        {
-            ts.max_vovel_in_row = std::max(ts.max_vovel_in_row, vow_in_row);
-            vow_in_row = 0u;
-        }
-        if(!is_cons)
-        {
-            ts.max_consonant_in_row = std::max(ts.max_consonant_in_row, cons_in_row);
-            cons_in_row = 0u;
-        }
-
-        vow_in_row += is_vow;
-        cons_in_row += is_cons;
-
-        ts.vowel_cnt += is_vow;
-        ts.consonant_cnt += is_cons;
-
-        if(!std::isdigit(src_ch, curr_loc))
-        {
-            ts.is_title_case &= std::isupper(src_ch, curr_loc);
-        }
-
+        sttcntr(*tgt);
+        sttcntr(src_ch, curr_loc);
     }
-    ts.max_consonant_in_row = std::max(ts.max_consonant_in_row, cons_in_row);
-    ts.max_vovel_in_row = std::max(ts.max_vovel_in_row, vow_in_row);   
+    ts = sttcntr.get();
     return true; 
 }
 

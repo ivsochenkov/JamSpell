@@ -33,16 +33,17 @@ public:
     , m_word_set{}
     , m_max_sz{maxCandCnt}
     , m_best_cnt {0u}
-    , m_cand_kind{ckFirstLvl}
     {
         m_impl.reserve(maxCandCnt);
         m_word_set.reserve(maxCandCnt);
     }
 
-    void set_kind (cand_kind_t const ck) noexcept { m_cand_kind = ck;}
-
     template <typename TStr>
-    bool insert (wdata_t const & wd, TStr && s, concat_inf_t const & drop)
+    bool insert (cand_kind_t const ck
+        , wdata_t const & wd
+        , TStr && s
+        , concat_inf_t const & ci
+    )
     {
         if(!m_word_set.insert(wd.id).second)
         {
@@ -61,15 +62,11 @@ public:
             {
                 return false;
             }
-            hback = cand_word_t{wd.id, std::forward<TStr>(s), wd.cnt
-                , m_cand_kind, drop
-            };
+            hback = cand_word_t{wd.id, std::forward<TStr>(s), wd.cnt, ck, ci};
             reset_heap_impl();
             return true;
         }        
-        m_impl.emplace_back(wd.id, std::forward<TStr>(s), wd.cnt
-            , m_cand_kind, drop
-        );
+        m_impl.emplace_back(wd.id, std::forward<TStr>(s), wd.cnt, ck, ci);
         reset_heap_impl();
         return true;
     }
@@ -86,9 +83,6 @@ private:
     word_set_t          m_word_set;
     std::size_t const   m_max_sz;
     cnt_t               m_best_cnt  = 0;
-
-    cand_kind_t         m_cand_kind;
-    
 
 };
 
@@ -108,7 +102,7 @@ public:
                 ,   SwitchedWordPenalty         = 3.0
                 ,   SwitchedWordIsKnownPenalty  = 15.0
                 ,   BadTokenPenalty             = 25.0
-                ,   ShortFragmentPenalty        = 60.0
+                ,   LengthMismatchPenaltyFactor = 2.0   // experimental
 
 //                ,   LowProbPenalty              = 20.0
 
@@ -136,11 +130,6 @@ public:
             = TLangModel::train_options_t::ReadFromEnv()
     );
 
-#ifdef SPLL_DEEPFIX_EXPERIMENTAL
-    void DeepFix(context_t & cntxt) const;
-    context_t DeepFix(std::wstring const & text) const ;
-#endif // #ifdef SPLL_DEEPFIX_EXPERIMENTAL
-
     void Fix(context_t & cntxt) const;
     context_t Fix(std::wstring const & text) const;
 
@@ -159,7 +148,13 @@ public:
 
 private:
 
-    using permutation_t = std::vector<std::uint8_t>;
+    struct fix_attrs_t
+    {
+        ::std::uint32_t     sw_cnt = 0;
+    };
+
+    TTokenizer const & GetTokenizer() const noexcept 
+    {return GetLangModel().GetTokenizer();}
 
     bool IsInfreq(word_t const & ow) const noexcept
     {
@@ -175,13 +170,20 @@ private:
         return cmgr.best_cnt() < m_opt.InFreqWordCntThreshold;
     }
 
-    static bool IsShortFragment(cntxt_word_t const &cw ) noexcept
-    {
-        return cw.concat.right > 1u;        
-    }
-
     TAlphabet const & GetAlphabet() const noexcept
-    { return GetLangModel().GetTokenizer().GetAlphabet(); }
+    { return GetTokenizer().GetAlphabet(); }
+
+    concat_inf_t PeelWord(token_info_t & tinf) const;
+
+    void InitContextWordFromToken(cntxt_word_t & w) const;
+
+    void Text2Context(wstr_view_t const & txt, context_t & cntxt) const;
+
+    context_t::iterator FixSentence(context_range_t const & curr_sent_ctxt ) const;
+
+    bool isSentEnd(context_t::iterator b
+        , context_t::iterator const & e
+    ) const noexcept;
 
     context_range_t GetNextSent(context_t::iterator const & b
         , context_t::iterator const & e
@@ -195,59 +197,22 @@ private:
 
     void FormCandidates(context_range_t const & context
         , ::std::size_t const position
+        , fix_attrs_t & fix_attrs
     ) const;
 
-    ::std::size_t CheckExtendedTokenStr(context_range_t const & cntxt
+    bool ProcessCandidates(context_range_t const & cntxt
         , ::std::size_t const pos
+        , fix_attrs_t & fix_attrs
+    ) const;
+
+    ::std::size_t CheckSwitchedCands (cntxt_word_t & cw 
         , TCandMgr & cmgr
     ) const;
 
-    void ProcessCandidates(context_range_t const & context
-        , ::std::size_t const position
-    ) const
-    { 
-        FormCandidates(context, position);
-        Score(context, position);
-    }
-
-    ::std::size_t CntNonSpacedNeighbours(context_range_t const & context
-        , ::std::size_t const position
-        , concat_inf_t & i
-    ) const;
-
-    bool PrevWordWasSwitched(context_range_t const & context
-        , ::std::size_t const position
-    ) const;
-
-    std::size_t  ManageDroppedTokens(context_t::iterator & al_word_it) const;
-
-    ::std::size_t CheckSwitchedCands (context_range_t const & context
-        , ::std::size_t const position
+    ::std::size_t CheckSwitchedCandsRight (cntxt_word_t & cw 
         , TCandMgr & cmgr
+        , ::std::size_t const l
     ) const;
-
-    ::std::size_t FormGreedySwitchedCandsRight (
-        context_range_t const & context
-        , ::std::size_t const position
-        , str_view_t const & sw_cand_str
-        , TCandMgr & cmgr       
-    ) const;
-
-    void MakeLeftCandsStrPrefix(context_range_t const & context
-        , ::std::size_t const position
-        , str_t & s
-    ) const;
-
-    void MakeRightCandsStr(context_range_t const & context
-        , ::std::size_t const position
-        , str_t & s
-    ) const;
-
-    static ::std::uint32_t CalcRPos(std::size_t cnt
-        , context_range_t const & context
-        , ::std::size_t const position
-        , std::size_t const rpos_ofs
-    );
 
     void AppendWithCase(std::wstring & result
         , wstr_view_t const & origWord
@@ -256,36 +221,46 @@ private:
 
     str_t PuntoSwitcher(str_view_t const &w) const;
 
-    void Edits(str_view_t const & word
+    void Edits(cand_kind_t const ck
+        , str_view_t const & word
         , TCandMgr & candidates
-        , concat_inf_t const & di = concat_inf_t{}
+        , concat_inf_t const & di
     ) const;
 
-    std::size_t Edits2(str_view_t const & word
+    std::size_t Edits2(cand_kind_t const ck
+        , str_view_t const & word
         , TCandMgr & candidates
-        , concat_inf_t const & di = concat_inf_t{}
+        , concat_inf_t const & di
     ) const;
 
-    void InsertsImpl(str_view_t const& w
+
+    void InsertsImpl(cand_kind_t const ck
+        , str_view_t const& w
         , std::size_t const i
         , TCandMgr& result
         , str_t & buf
         , concat_inf_t const & di
     ) const;
-    void Inserts(str_view_t const & w
+
+    void Inserts(cand_kind_t const ck
+        , str_view_t const & w
         , TCandMgr& result
         , str_t & s
         , concat_inf_t const & di
     ) const;
 
-    void Inserts2Impl(str_view_t const & w
+
+    void Inserts2Impl(cand_kind_t const ck
+        , str_view_t const & w
         , std::size_t const i
         , TCandMgr& result
         , str_t & s
         , str_t & buf
         , concat_inf_t const & di
     ) const;
-    void Inserts2(str_view_t const & w
+
+    void Inserts2(cand_kind_t const ck
+        , str_view_t const & w
         , TCandMgr& result
         , concat_inf_t const & di
     ) const;
@@ -295,55 +270,50 @@ private:
     bool LoadCache(const std::string& cacheFile);
     bool SaveCache(const std::string& cacheFile);
 
-    bool Push2Candidates (str_t && w
+    bool Push2Candidates (cand_kind_t const ck
+        , str_t && w
         , wdata_t const & wd
         , TCandMgr & cmgr
-        , concat_inf_t const & di //= concat_inf_t{}
+        , concat_inf_t const & di 
     ) const;
 
-    bool Append2Candidates (str_view_t const & w
+    bool Append2Candidates (cand_kind_t const ck
+        , str_view_t const & w
         , wdata_t const & wd
         , TCandMgr & cmgr
-        , concat_inf_t const & di //= concat_inf_t{}
+        , concat_inf_t const & di 
     ) const;
 
-    bool LookupAndAppend2Candidates(str_view_t const & w
+    bool LookupAndAppend2Candidates(cand_kind_t const ck
+        , str_view_t const & w
         , TCandMgr & cmgr
-        , concat_inf_t const & di //= concat_inf_t{}
+        , concat_inf_t const & di 
     ) const
-    {return Append2Candidates(w, LangModel.GetWordInfo(w), cmgr, di); }
+    {return Append2Candidates(ck, w, LangModel.GetWordInfo(w), cmgr, di); }
 
     context_crange_t GetSentenceRange( context_crange_t const & sentence
         , std::size_t const pos
     ) const;
 
-#ifdef SPLL_DEEPFIX_EXPERIMENTAL
-    static void ApplyP(context_range_t const & context, permutation_t const & p);
+    void Score(fix_attrs_t const & fixa
+        , context_range_t const & context
+        , std::size_t const pos
+    ) const;
 
-    float PScore(context_range_t const & context, permutation_t const & p) const;
-#endif // #ifdef SPLL_DEEPFIX_EXPERIMENTAL
 
-    void Score(context_range_t const & context, std::size_t const pos) const;
+    void ScoreCandidate (fix_attrs_t const & fixa
+        , cntxt_word_t const & ctx_word
+        , cand_word_t & cnd
+    ) const;
 
-#ifdef SPLL_DEEPFIX_EXPERIMENTAL
-    void DeepScore(context_range_t const & context) const;
-#endif // #ifdef SPLL_DEEPFIX_EXPERIMENTAL
-
-    void ScoreCandidate (cntxt_word_t const & ctx_word, cand_word_t & cnd) const;
-
-    float ScoreOrig(context_range_t const & cntxt
+    float ScoreOrig(fix_attrs_t const & fixa
+        , context_range_t const & cntxt
         , ::std::size_t const pos
     ) const;
 
     float ReScore (word_t const & w, float sc, token_stat_t const ts) const noexcept
     {
-        /*
-        float const gp = LangModel.CalcGram1Prob(w)
-            , ep = LangModel.ExpectedProb(w.str.size());
-
-        sc -= (gp < (ep / 2.0) ) ? m_opt.LowProbPenalty : 0.0;
-        */
-        sc -= LangModel.TokenIsBad(w.str, ts)  ?  m_opt.BadTokenPenalty : 0.0;
+        sc -= LangModel.TokenIsBad(w.str, ts)  *  m_opt.BadTokenPenalty;
         return sc;
     }
 

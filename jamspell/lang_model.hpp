@@ -276,8 +276,8 @@ public:
     {
         return (!ts.is_title_case)
             && (
-                    (alStr.size() >= 2 && ts.consonant_cnt == alStr.size())
-                ||  (alStr.size() > 3 && ts.vowel_cnt == alStr.size())
+                    (alStr.size() >= 2u && ts.consonant_cnt == alStr.size())
+                ||  (alStr.size() > 3u && ts.vowel_cnt == alStr.size())
                 ||  ts.max_consonant_in_row > 7u
                 ||  ts.max_vovel_in_row > 5u
                );
@@ -319,11 +319,7 @@ public:
     template <typename TTokens, typename TWords>
     void InitWords(TTokens & orig_txt_tok, TWords & wrds) const;
 
-    template <typename TCntxt>
-    void InitContext(TCntxt & cntxt) const;
-
     void Text2Words(wstr_view_t const & txt, words_t & wrds) const;
-    void Text2Words(wstr_view_t const & txt, context_t & cntxt) const;
 
     uint64_t GetCheckSum() const noexcept {return CheckSum;}
 
@@ -456,17 +452,7 @@ void TLangModel::InitWords(TTokens & orig_txt_tok, TWords & wrds) const
     wrds.resize(std::distance(wrds.begin(), wit));
 }
 
-template <typename TCntxt>
-void TLangModel::InitContext(TCntxt & cntxt) const
-{   
-    auto wit = cntxt.begin();
-    for (cntxt_word_t & cw : cntxt)
-    {
-        // LISPanyk would be happy
-        SetKind(*wit, cand_kind_t(InitWordFromToken(cw.token, Word(*wit))));
-        ++wit;
-    }
-}
+
 
 ////////////////////////////////////////////////////////////////////////////////
 

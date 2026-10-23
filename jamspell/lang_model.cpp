@@ -96,15 +96,6 @@ struct TLangModel::TGramLoader
     
     struct TGramKeyHash
     {
-        /*
-        ::std::size_t operator()(const TLangModel::TGramKey& x) const noexcept
-        {
-            ::std::size_t seed  = ::boost::hash_value(x[2u]);
-            boost::hash_combine(seed, NJamSpell::to_underlying(x[1u]));
-            boost::hash_combine(seed, NJamSpell::to_underlying(x[0u]));
-            return seed;
-        }
-        */
         static ::std::uint64_t splitmix64(::std::uint64_t x) noexcept 
         {
             x += 0x9e3779b97f4a7c15ULL;
@@ -587,7 +578,6 @@ float TLangModel::Score(text_tokens_t & words) const
 float TLangModel::Score(std::wstring const & str ) const 
 {
     text_tokens_t orig_txt_tokens = GetTokenizer().Parse(str);
-    GetTokenizer().Filter4Spell(orig_txt_tokens);
     return Score(orig_txt_tokens);
 }
 
@@ -664,14 +654,6 @@ void TLangModel::Text2Words(wstr_view_t const & txt, words_t & wrds) const
 {
     text_tokens_t txt_toks = GetTokenizer().Parse(txt);
     InitWords(txt_toks, wrds);
-}
- 
-
-void TLangModel::Text2Words(wstr_view_t const & txt, context_t & cntxt) const
-{
-    ReserveWords(cntxt, txt);
-    GetTokenizer().Parse(txt, cntxt);
-    InitContext(cntxt);
 }
 
 wdata_t TLangModel::GetWordInfo(str_view_t const & word) const 

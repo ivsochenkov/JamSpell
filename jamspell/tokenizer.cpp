@@ -90,6 +90,11 @@ TTokenizer::TTokenizer()
 {
 }
 
+TTokenizer::TTokenizer(wchar_t const * delims)
+    : Locale(GetLocale () )
+{
+}
+
 bool TTokenizer::LoadAlphabet(const std::string& alphabetFile) 
 {
     return Alphabet.LoadFromFile(alphabetFile);

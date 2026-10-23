@@ -35,6 +35,8 @@ class TTokenizer
 
 public:
 
+    static constexpr wchar_t const * SPACES = L" \t\n\r\f\v";
+
     using sep_type = boost::char_separator<wchar_t>;
 
     using token_type = token_t;
@@ -58,8 +60,6 @@ public:
    состоящее из 189 819 букв.
 */
 
-private:
-
     static inline bool isSoftSentEnd(wchar_t const ch) noexcept
     { 
         return ch == L'.' || ch == 0x2026; // "..."
@@ -67,7 +67,12 @@ private:
 
     static inline bool isHardSentEnd(wchar_t const ch) noexcept
     { return ch == L'!' || ch == L'?'; }
-    
+
+    bool isCapitalLetter(wchar_t const wch)const 
+    {return std::isupper(wch, Locale);}
+
+private:
+
     bool areSpaceDelimited(text_tokens_const_iterator_t const curr_tok_it
         , text_tokens_const_iterator_t const next
     ) const noexcept
@@ -78,8 +83,7 @@ private:
     ) const noexcept
     { return areNotSpaced(*curr_tok_it, *next);}  
 
-    bool isCapitalLetter(wchar_t const wch)const 
-    {return std::isupper(wch, Locale);}
+    
 
     inline bool good4join (text_tokens_const_iterator_t const & a
         , text_tokens_const_iterator_t const & b
@@ -108,6 +112,8 @@ public:
 
     TTokenizer();
 
+    explicit TTokenizer(wchar_t const * delims);
+
     bool LoadAlphabet(const std::string& alphabetFile);
 
     text_tokens_t Parse(wstr_view_t const & txt
@@ -119,9 +125,6 @@ public:
         , TTokens & rtoks
         , sep_type const & sep = sep_type{}
     ) const;
-
-    template <typename TTtokens>
-    void Filter4Spell(TTtokens & tokens) const;
 
     void Filter4Train(text_tokens_t & tokens) const;
 
@@ -195,54 +198,6 @@ void TTokenizer::Parse(wstr_view_t const & txt
     {
         rtoks.emplace_back(token.make_info(txt));
     }
-}
-
-
-template <typename TTtokens>
-void TTokenizer::Filter4Spell(TTtokens & tokens) const
-{
-    if(tokens.empty())
-    {
-        return;
-    }
-
-#if 0
-    auto tgt_it = tokens.begin();
-    for (auto nxt_it = tgt_it, e = tokens.end()
-        ; ++nxt_it != e
-        ;
-    )
-    {
-        if(Joinable(tgt_it, nxt_it))
-        {
-            DoJoin(*tgt_it, *nxt_it)
-            /*
-            tgt_it -> reset (tgt_it -> pos() 
-                , nxt_it -> pos() + nxt_it -> size() - tgt_it -> pos()
-            );
-            */
-        }
-        else
-        {
-            *(++tgt_it) = std::move(*nxt_it);
-        }
-    }
-
-    auto const e = ++tgt_it; // N!B!
-    for (auto i = tgt_it = tokens.begin(); i != e; ++i)
-    {
-        std::size_t const tsz = GetTokenSize(*i);
-        if( tsz < max_word_length && 
-            (tsz > 1u  || (tsz > 0u && isSentBreak(i, e))) 
-        )
-        {
-            (tgt_it++) -> assign (*i);
-        }
-    }
-
-    tokens.resize(std::distance(tokens.begin(), tgt_it));
-#endif
-
 }
 
 
