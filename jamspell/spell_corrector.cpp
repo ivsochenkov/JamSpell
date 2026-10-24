@@ -892,7 +892,7 @@ TSpellCorrector
         case ckOrigSw:
         {
             cnd.score -= (ctx_word.attrs.orig_is_known) ? 
-                    m_opt.OrigWordIsKnownPenalty 
+                    m_opt.OrigWordIsKnownPenalty / (1u + fixa.sw_cnt)
                 :   m_opt.OrigWordIsUnknownPenalty;
             //break;
         }
