@@ -484,19 +484,21 @@ TSpellCorrector::CheckSwitchedCands (cntxt_word_t & cw
     //attrs.sw_orig_is_known = false;
 
     str_view_t cand_str = s;
-    concat_inf_t ci (l, cw.concat.right);
+    concat_inf_t ci (l, 0u);
     ::std::size_t cnt = 0u;
     do
     {
         added_cnt += Edits2(ckFirstLvlSw, cand_str, cmgr, ci);
-        if((added_cnt && !CandidatesAreInfreq(cmgr)) || !(ci.right--))
+        if(     (added_cnt && !CandidatesAreInfreq(cmgr)) 
+            ||  ++ci.right > cw.concat.right
+            ||  ++cnt >= 3u
+        )
         {
-            break;
+            return added_cnt;
         }
         cand_str.remove_suffix(1u);
     }
-    while ( ++cnt <= 3u);
-
+    while ( true );
     return added_cnt;
 }
 
@@ -954,7 +956,7 @@ void TSpellCorrector::ScoreOrig(fix_attrs_t const & fixa
 ) const
 {
     cntxt_word_t & cw = cntxt[pos];
-    float sc = LangModel.Score(GetSentenceRange(cntxt, pos)); 
+    cw.orig_word.score = LangModel.Score(GetSentenceRange(cntxt, pos)); 
     ReScore(cw.orig_word, cw.token.stat());
     cw.orig_word.score -= (!fixa.sw_cnt) * m_opt.SwitchedWordPenalty;
     cw.orig_word.score -= cw.concat.left * m_opt.LengthMismatchPenaltyFactor;
