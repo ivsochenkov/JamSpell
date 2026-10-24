@@ -392,6 +392,11 @@ struct cntxt_word_t
         return s;
     }
 
+    ::std::size_t get_peeled_size() const 
+    {
+        return orig_word.str.size() - orig_word.concat.left - orig_word.concat.right;
+    }
+
     candidates_t        candidates;
     cand_ref_t          best_cand;
     cand_word_t         orig_word;

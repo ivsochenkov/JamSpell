@@ -221,12 +221,14 @@ std::wstring TSpellCorrector::FixFragment(std::wstring const & text) const
             continue;
         }
 
-        size_t const currOrigPos = cw.token.ofs();
+        cand_word_t const & nw = cw.get_best_cand();
+
+        size_t const currOrigPos = cw.token.ofs() + nw.concat.left;
         result += orig_txt.substr(origPos, currOrigPos - origPos);
         origPos = currOrigPos;
             
-        AppendWithCase(result, cw.token.str(), cw.get_best_cand().str); 
-        origPos += cw.token.size();
+        AppendWithCase(result, cw.token.str().substr(nw.concat.left), nw.str); 
+        origPos += (cw.token.size() - nw.concat.size());
     }
 
     result += orig_txt.substr(origPos, text.size() - origPos);
@@ -392,7 +394,7 @@ void TSpellCorrector::FormCandidates(context_range_t const & context
     
     if(ow.concat.left == ow.str.size() || (ow.concat.size() > 3u)) 
     {
-        // word consists of punctuations only
+        // word consists of punctuation only
         CheckSwitchedCands(cw, cndMgr);  
     }
     else
