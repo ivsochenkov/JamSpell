@@ -74,6 +74,7 @@ TSpellCorrector::opt_t TSpellCorrector::opt_t::ReadFromEnv()
     setValFromEnv(opt.SwitchedWordPenalty, "SPLL_SWITCHED_WORD_PEN");
     setValFromEnv(opt.SwitchedWordIsKnownPenalty, "SPLL_SWITCHED_WORD_IS_KNOWN_PEN");
     setValFromEnv(opt.BadTokenPenalty, "SPLL_BAD_TOKEN_PENALTY");
+    setValFromEnv(opt.LengthMismatchPenaltyFactor, "SPLL_LENGTH_MISMATCH_PEN_FACTOR");
 
     //setValFromEnv(opt.LowProbPenalty, "SPLL_LOW_PROB_PENALTY");
     
