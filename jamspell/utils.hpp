@@ -364,7 +364,6 @@ struct cntxt_word_t
     , orig_word{}
     , token{tinf}
     , attrs{}
-    , concat{}
     {}
 
     cand_word_t & set_best_cand (std::size_t const i)
@@ -388,8 +387,8 @@ struct cntxt_word_t
     str_view_t get_peeled() const 
     {
         str_view_t s = orig_word.str;
-        s.remove_prefix(concat.left);
-        s.remove_suffix(concat.right);
+        s.remove_prefix(orig_word.concat.left);
+        s.remove_suffix(orig_word.concat.right);
         return s;
     }
 
@@ -398,7 +397,6 @@ struct cntxt_word_t
     cand_word_t         orig_word;
     token_info_t        token;    
     cntxt_attr_t        attrs;
-    concat_inf_t        concat;
     
 };
 

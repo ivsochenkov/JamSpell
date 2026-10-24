@@ -101,7 +101,7 @@ public:
                 ,   SecondLvlPenalty            = 10.0       
                 ,   SwitchedWordPenalty         = 3.0
                 ,   SwitchedWordIsKnownPenalty  = 15.0
-                ,   BadTokenPenalty             = 25.0
+                ,   BadTokenPenalty             = 50.0
                 ,   LengthMismatchPenaltyFactor = 2.0   // experimental
 
 //                ,   LowProbPenalty              = 20.0
@@ -110,7 +110,7 @@ public:
             ;
 
         ::std::size_t         MaxCandidatesToCheck = 64u
-                            , InFreqWordCntThreshold = 300u
+                            , InFreqWordCntThreshold = 200u
         ;
 
         static opt_t ReadFromEnv();

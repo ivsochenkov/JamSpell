@@ -258,16 +258,17 @@ concat_inf_t TSpellCorrector::PeelWord(token_info_t & tinf) const
 
 void TSpellCorrector::InitContextWordFromToken(cntxt_word_t & w) const
 {
+    cand_word_t & ow = w.orig_word;
     if(w.token.size() < MAX_WORD_LENGTH * 2u   // concat of two longest words!!!
-        && ToAlphabet(GetAlphabet(), w.token.str(), w.orig_word.str, w.token.stat())
+        && ToAlphabet(GetAlphabet(), w.token.str(), ow.str, w.token.stat())
     )
     {
-        w.orig_word.kind = cand_kind_t::ckOrig;
+        ow.kind = cand_kind_t::ckOrig;
 
-        w.concat = PeelWord(w.token);
-        if(w.concat.left == w.token.size())
+        ow.concat = PeelWord(w.token);
+        if(ow.concat.left == w.token.size())
         {
-            w.concat.right = 0u;
+            ow.concat.right = 0u;
             return ;
         }
 
@@ -276,9 +277,9 @@ void TSpellCorrector::InitContextWordFromToken(cntxt_word_t & w) const
         return;
     }
     // handle long or ill-formed words
-    w.orig_word.str = str_t{};
-    w.orig_word.id = word_id_t::Any;
-    w.orig_word.kind = cand_kind_t::ckNone;
+    ow.str = str_t{};
+    ow.id = word_id_t::Any;
+    ow.kind = cand_kind_t::ckNone;
 }
 
 void TSpellCorrector::Text2Context(wstr_view_t const & txt, context_t & cntxt) const
@@ -389,7 +390,7 @@ void TSpellCorrector::FormCandidates(context_range_t const & context
     // PITIPITIPIW WIW WIW
     TCandMgr cndMgr(cw.candidates, m_opt.MaxCandidatesToCheck);
     
-    if(cw.concat.left == ow.str.size() || (cw.concat.size() > 3u)) 
+    if(ow.concat.left == ow.str.size() || (ow.concat.size() > 3u)) 
     {
         // word consists of punctuations only
         CheckSwitchedCands(cw, cndMgr);  
@@ -399,7 +400,7 @@ void TSpellCorrector::FormCandidates(context_range_t const & context
         
         if(ow_str.size() > 1u)
         {
-            Edits2(ckFirstLvl, ow_str, cndMgr, cw.concat);
+            Edits2(ckFirstLvl, ow_str, cndMgr, ow.concat);
         }
         
         if (    fix_attrs.sw_cnt 
@@ -413,7 +414,7 @@ void TSpellCorrector::FormCandidates(context_range_t const & context
         
         if(CandidatesAreInfreq(cndMgr))
         {
-            Edits(ckSecondLvl, ow_str, cndMgr, cw.concat);
+            Edits(ckSecondLvl, ow_str, cndMgr, ow.concat);
         }
         
     }
@@ -441,7 +442,7 @@ TSpellCorrector::CheckSwitchedCands (cntxt_word_t & cw
     {
         added_cnt += CheckSwitchedCandsRight(cw, cmgr, l);        
     }
-    while (++l <= cw.concat.left && (!added_cnt || CandidatesAreInfreq(cmgr)));
+    while (++l <= cw.orig_word.concat.left && (!added_cnt || CandidatesAreInfreq(cmgr)));
 
     return added_cnt;
 }
@@ -463,7 +464,7 @@ TSpellCorrector::CheckSwitchedCands (cntxt_word_t & cw
     if(!w.unknown())
     {
         //check, if the longest prefix is at least long as context[position].str
-        if( w.str.size() >=  (ostr.size() - l - cw.concat.right) )
+        if( w.str.size() >=  (ostr.size() - l - cw.orig_word.concat.right) )
         {
             concat_inf_t const nci (l, ostr.size() - l - w.str.size());
             cw.attrs.sw_orig_is_known = true;
@@ -490,7 +491,7 @@ TSpellCorrector::CheckSwitchedCands (cntxt_word_t & cw
     {
         added_cnt += Edits2(ckFirstLvlSw, cand_str, cmgr, ci);
         if(     (added_cnt && !CandidatesAreInfreq(cmgr)) 
-            ||  ++ci.right > cw.concat.right
+            ||  ++ci.right > cw.orig_word.concat.right
             ||  ++cnt >= 3u
         )
         {
@@ -946,8 +947,8 @@ TSpellCorrector
     token_stat_t ts {GetAlphabet().CalcTokenStat(cnd.str)};
     ts.is_title_case = ctx_word.token.stat().is_title_case;
     ReScore(cnd, ts);
-    cnd.score -= std::abs(long(cnd.str.size()) - ctx_word.token.size()) 
-        * m_opt.LengthMismatchPenaltyFactor;
+    //cnd.score -= std::abs(long(cnd.str.size()) - ctx_word.token.size()) 
+    //      * m_opt.LengthMismatchPenaltyFactor;
 }
 
 void TSpellCorrector::ScoreOrig(fix_attrs_t const & fixa
@@ -959,7 +960,7 @@ void TSpellCorrector::ScoreOrig(fix_attrs_t const & fixa
     cw.orig_word.score = LangModel.Score(GetSentenceRange(cntxt, pos)); 
     ReScore(cw.orig_word, cw.token.stat());
     cw.orig_word.score -= (!fixa.sw_cnt) * m_opt.SwitchedWordPenalty;
-    cw.orig_word.score -= cw.concat.left * m_opt.LengthMismatchPenaltyFactor;
+    cw.orig_word.score -= cw.orig_word.concat.size() * m_opt.LengthMismatchPenaltyFactor;
 }
 
 
