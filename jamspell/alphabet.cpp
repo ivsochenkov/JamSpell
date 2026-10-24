@@ -164,6 +164,19 @@ private:
     std::uint8_t vow_in_row = 0u, cons_in_row = 0;
 };
 
+bool TAlphabet::isOneOf(wchar_t const ch, wchar_t const * chrs) noexcept
+{
+    do 
+    {
+        if(*chrs == ch)
+        {
+            return true;
+        }
+    }
+    while (*chrs++ != 0);
+    return false;    
+}
+
 
 token_stat_t TAlphabet::CalcTokenStat(str_view_t const & s) const
 { 

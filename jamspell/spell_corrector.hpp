@@ -16,27 +16,39 @@ class TCandMgr
 
     struct wheap_order_t
     {
+        bool is_greater (cand_word_t const & lhs
+            , wdata_t const & rhs
+            , cand_kind_t const ck
+        ) const noexcept
+        {   
+            // max-heap!
+            return lhs.cnt != rhs.cnt ? lhs.cnt > rhs.cnt : lhs.kind < ck ; 
+        }
+
         bool operator () (cand_word_t const & lhs
             , cand_word_t const & rhs
         ) const noexcept
-        { return lhs.cnt > rhs.cnt; }  // max-heap!
+        {   
+            // max-heap!
+            return is_greater (lhs, rhs, rhs.kind); 
+        }
     }; 
 
-    using word_set_t = tsl::robin_set<word_id_t>;
+    /*
+    using word_set_t = tsl::robin_set<word_id_t
+        , ::std::hash<word_id_t>
+        , ::std::equal_to<word_id_t>
+        , ::std::allocator<word_id_t>
+        , false // do not store hash
+        , tsl::rh::prime_growth_policy
+        >;
+    */
 
 public:
 
     using result_type = impl_type;
 
-    explicit TCandMgr (candidates_t & cands, std::size_t const maxCandCnt = 64u)
-    : m_impl{cands}
-    , m_word_set{}
-    , m_max_sz{maxCandCnt}
-    , m_best_cnt {0u}
-    {
-        m_impl.reserve(maxCandCnt);
-        m_word_set.reserve(maxCandCnt);
-    }
+    explicit TCandMgr (candidates_t & cands, std::size_t const maxCandCnt = 64u);
 
     template <typename TStr>
     bool insert (cand_kind_t const ck
@@ -45,11 +57,13 @@ public:
         , concat_inf_t const & ci
     )
     {
+        static wheap_order_t const cmp;
+/*
         if(!m_word_set.insert(wd.id).second)
         {
             return false;
         }
-
+*/
         if (m_best_cnt < wd.cnt )
         {
             m_best_cnt = wd.cnt;
@@ -58,10 +72,11 @@ public:
         if((m_impl.size() >= m_max_sz) )
         {
             cand_word_t & hback = m_impl.back();
-            if(wd.cnt <= hback.cnt)
+            if(cmp.is_greater(hback, wd, ck))
             {
                 return false;
             }
+    
             hback = cand_word_t{wd.id, std::forward<TStr>(s), wd.cnt, ck, ci};
             reset_heap_impl();
             return true;
@@ -80,7 +95,7 @@ private:
     void reset_heap_impl ();
 
     impl_type        &  m_impl;
-    word_set_t          m_word_set;
+ //   word_set_t          m_word_set;
     std::size_t const   m_max_sz;
     cnt_t               m_best_cnt  = 0;
 
@@ -181,7 +196,11 @@ private:
 
     context_t::iterator FixSentence(context_range_t const & curr_sent_ctxt ) const;
 
-    bool isSentEnd(context_t::iterator b
+    static sent_end_kind_t endsWithSentEnd(wstr_view_t const & tok_str
+        , ::std::size_t cright
+    );
+
+    bool isSentEnd(context_t::iterator const & b
         , context_t::iterator const & e
     ) const noexcept;
 

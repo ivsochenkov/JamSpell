@@ -73,6 +73,15 @@ kindCV_t GetCVKind(wchar_t const c);
 
 ////////////////////////////////////////////////////////////////////////////////
 
+enum class sent_end_kind_t : unsigned char
+{
+    sekNone = 0,
+    sekSoft,
+    sekHard
+};
+
+////////////////////////////////////////////////////////////////////////////////
+
 struct token_stat_t
 {
     std::uint8_t        vowel_cnt               = 0u
@@ -263,9 +272,9 @@ enum cand_kind_t : unsigned char
         ckNone          = 0u
     ,   ckOrig
     ,   ckOrigSw
-    ,   ckFirstLvl
-    ,   ckSecondLvl
+    ,   ckFirstLvl    
     ,   ckFirstLvlSw 
+    ,   ckSecondLvl
     ,   ckSecondLvlSw
 };
 

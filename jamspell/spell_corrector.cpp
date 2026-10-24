@@ -54,7 +54,15 @@ static del2_vec_t GetDeletes2(str_view_t const & w)
     return results;
 }
 
-
+TCandMgr::TCandMgr (candidates_t & cands, std::size_t const maxCandCnt)
+: m_impl{cands}
+//, m_word_set{}
+, m_max_sz{maxCandCnt}
+, m_best_cnt {0u}
+{
+    m_impl.reserve(maxCandCnt);
+    //m_word_set.reserve(maxCandCnt * 1.5 + 8u);
+}
 
 void TCandMgr::reset_heap_impl ()
 {
@@ -321,19 +329,53 @@ TSpellCorrector::FixSentence(context_range_t const & curr_sent_ctxt ) const
     return curr_sent_ctxt.end();
 }
 
+sent_end_kind_t TSpellCorrector::endsWithSentEnd(wstr_view_t const & tok_str
+    , ::std::size_t cright
+)
+{
+    sent_end_kind_t sek = sent_end_kind_t::sekNone;
+    for (auto t = tok_str.rbegin() ; cright; --cright, ++t)
+    {
+        wchar_t const wc = *t;
+        if(TTokenizer::isSoftSentEnd(wc))
+        {
+            sek = sent_end_kind_t::sekSoft;
+        }
+        else if(TTokenizer::isHardSentEnd(wc))
+        {
+            sek = sent_end_kind_t::sekHard;
+            return sek;
+        }
+    }
+    return sek;    
+}
 
-bool TSpellCorrector::isSentEnd(context_t::iterator b
+inline bool TSpellCorrector::isSentEnd(context_t::iterator const & b
     , context_t::iterator const & e
 ) const noexcept
 {
-    wchar_t const tb = b -> token.back();
-    ++b;
+    context_t::iterator nxt = b;
 
-    return (b == e)
-    || TTokenizer::isHardSentEnd(tb) 
-    || (TTokenizer::isSoftSentEnd(tb)
-        &&  (GetAlphabet().isUpper(b -> token.front()) )
-       ); // LISPanyk is happy! =)
+    if(++nxt == e)
+    {
+        return true;
+    }
+
+    ::std::size_t const cr = b -> orig_word.concat.right;
+    if(!cr)
+    {
+        return false;
+    }
+    
+    sent_end_kind_t const sek = endsWithSentEnd(b -> token.str(), cr);
+    if(sek == sent_end_kind_t::sekNone)
+    {
+        return false;
+    }
+    
+    return (sek == sent_end_kind_t::sekHard) 
+    ||  // remains only (sek == sent_end_kind_t::sekSoft) &&
+    GetAlphabet().isUpper(*(nxt -> token.str().begin() + nxt -> orig_word.concat.left));
 }
 
 context_range_t TSpellCorrector::GetNextSent(context_t::iterator const & b
@@ -440,12 +482,15 @@ TSpellCorrector::CheckSwitchedCands (cntxt_word_t & cw
     , TCandMgr & cmgr
 ) const
 {
+    bool const opening_pnkt = TAlphabet::isOpeningPunct(cw.token.front());
     ::std::size_t l = 0u, added_cnt = 0u;
     do
     {
         added_cnt += CheckSwitchedCandsRight(cw, cmgr, l);        
     }
-    while (++l <= cw.orig_word.concat.left && (!added_cnt || CandidatesAreInfreq(cmgr)));
+    while (++l <= cw.orig_word.concat.left 
+        && ( !added_cnt || CandidatesAreInfreq(cmgr) || opening_pnkt ) 
+    );
 
     return added_cnt;
 }

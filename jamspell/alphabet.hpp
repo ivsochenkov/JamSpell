@@ -134,6 +134,8 @@ public:
 
     token_stat_t CalcTokenStat(str_view_t const & s) const;
 
+    static bool isOneOf(wchar_t const ch, wchar_t const * chrs) noexcept;
+
     bool isPunct (wchar_t const ch) const
     {
         return ::std::ispunct(ch, Locale);
@@ -147,6 +149,11 @@ public:
     bool isUpper (wchar_t const ch) const
     {
         return ::std::isupper(ch, Locale);
+    }
+
+    static bool isOpeningPunct (letter_type const chr) noexcept
+    {
+        return  isOneOf(chr, L"({[\"\'<-");
     }
 
 private:

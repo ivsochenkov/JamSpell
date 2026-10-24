@@ -17,19 +17,8 @@ inline bool TTokenizer::good4join (text_tokens_const_iterator_t const & a
     return isGoodWordToken(*c) 
         && areNotSpaceDelimited(a, b) 
         && areNotSpaceDelimited(b, c)
-        && (b -> size() == 1) && isA(b -> front(), L"-\'");
+        && (b -> size() == 1) && TAlphabet::isOneOf(b -> front(), L"-\'");
 }
-
-inline bool TTokenizer::good4join(text_tokens_const_iterator_t const& a
-    , text_tokens_const_iterator_t const & b
-) const
-{
-    return areNotSpaceDelimited(a, b) 
-        && !((a -> size() == 1) && isA(a -> front(), L"([{")) 
-        && !((b -> size() == 1) && isA(b -> front(), L".,;:!?)")); 
-    ; 
-}
-
 
 void TTokenizer::Filter4Train(text_tokens_t & tokens) const
 {
@@ -100,17 +89,6 @@ text_tokens_t TTokenizer::Parse(wstr_view_t const & txt
     ReserveWords(ret, txt);
     Parse(txt, ret, sep);
     return ret;
-}
-
-bool TTokenizer::isA(wchar_t const ch, wchar_t const * chrs) noexcept
-{
-    do 
-    {
-        if(*chrs == ch)
-            return true;
-    }
-    while (*chrs++ != 0);
-    return false;    
 }
 
 void TTokenizer::Clear() 
