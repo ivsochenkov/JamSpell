@@ -88,6 +88,7 @@ struct token_stat_t
                     ,   consonant_cnt           = 0u
                     ,   max_vovel_in_row        = 0u        
                     ,   max_consonant_in_row    = 0u
+                    ,   int_punct_cnt           = 0u
                     ;
     bool                is_title_case = false;
 };

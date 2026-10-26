@@ -143,10 +143,12 @@ struct stat_counter_t
 
     void operator () (wchar_t const wch) 
     {
-        if(!m_alphabet.isPunct(wch) && ! m_alphabet.isDigit(wch))
+        bool const is_pnkt = m_alphabet.isPunct(wch);
+        if(!is_pnkt && ! m_alphabet.isDigit(wch))
         {
             ts.is_title_case &= m_alphabet.isUpper(wch);
         }
+        ts.int_punct_cnt += is_pnkt;
     }
 
     token_stat_t get() noexcept
@@ -185,7 +187,6 @@ token_stat_t TAlphabet::CalcTokenStat(str_view_t const & s) const
     {      
         scntr(c);
     }
-     
     return scntr.get();
 }
 

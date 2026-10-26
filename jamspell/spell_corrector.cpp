@@ -248,21 +248,26 @@ std::wstring TSpellCorrector::FixFragment(std::wstring const & text) const
     return result;
 }
 
-concat_inf_t TSpellCorrector::PeelWord(token_info_t & tinf) const
+concat_inf_t TSpellCorrector::PeelWord(token_info_t & tinf
+    , ::std::uint8_t & has_int_pnkt
+) const
 {
     concat_inf_t cinf;
     wstr_view_t ts = tinf.str();
     for (auto i = ts.begin()
         ; (i != ts.end()) && GetAlphabet().isPunct(*i) 
-        ; ++i, ++cinf.left 
+        ; ++i, ++cinf.left
+    )
+    {}
+        
+    for (auto i = ts.rbegin()
+        ; (i != ts.rend()) && GetAlphabet().isPunct(*i) 
+        ; ++i, ++cinf.right
     )
     {}
 
-    for (auto i = ts.rbegin()
-        ; (i != ts.rend()) && GetAlphabet().isPunct(*i) 
-        ; ++i, ++cinf.right 
-    )
-    {}
+    has_int_pnkt -= TAlphabet::isOpeningPunct(ts.front());
+    has_int_pnkt -= (cinf.right <= 2u) ? cinf.right : 2;
 
     return cinf;    
 }
@@ -275,8 +280,7 @@ void TSpellCorrector::InitContextWordFromToken(cntxt_word_t & w) const
     )
     {
         ow.kind = cand_kind_t::ckOrig;
-
-        ow.concat = PeelWord(w.token);
+        ow.concat = PeelWord(w.token, w.token.stat().int_punct_cnt);
         if(ow.concat.left == w.token.size())
         {
             ow.concat.right = 0u;
@@ -438,31 +442,43 @@ void TSpellCorrector::FormCandidates(context_range_t const & context
     if(ow.concat.left == ow.str.size() || (ow.concat.size() > 3u)) 
     {
         // word consists of punctuation only
-        CheckSwitchedCands(cw, cndMgr);  
+        CheckSwitchedCands(cw, cndMgr);
+        return;
     }
-    else
+    
+    if (cw.token.stat().int_punct_cnt)
     {
-        
-        if(ow_str.size() > 1u)
+        CheckSwitchedCands(cw, cndMgr);
+        if(ow_str.size() > 1u && CandidatesAreInfreq(cndMgr))
         {
             Edits2(ckFirstLvl, ow_str, cndMgr, ow.concat);
+            if(CandidatesAreInfreq(cndMgr))
+            {
+                Edits(ckSecondLvl, ow_str, cndMgr, ow.concat);
+            }
         }
-        
-        if (    fix_attrs.sw_cnt 
-            ||  !cw.attrs.orig_is_known
-            ||  CandidatesAreInfreq(cndMgr)
-            ||  LangModel.TokenIsBad(ow_str, cw.token.stat())
-        )
-        {
-            CheckSwitchedCands(cw, cndMgr);   
-        }
-        
-        if(CandidatesAreInfreq(cndMgr))
-        {
-            Edits(ckSecondLvl, ow_str, cndMgr, ow.concat);
-        }
-        
+        return;
     }
+    
+    if(ow_str.size() > 1u)
+    {
+        Edits2(ckFirstLvl, ow_str, cndMgr, ow.concat);
+    }
+
+    if (    fix_attrs.sw_cnt 
+        ||  !cw.attrs.orig_is_known
+        ||  CandidatesAreInfreq(cndMgr)
+        ||  LangModel.TokenIsBad(ow_str, cw.token.stat())
+    )
+    {
+        CheckSwitchedCands(cw, cndMgr);   
+    }
+    
+    if(CandidatesAreInfreq(cndMgr))
+    {
+        Edits(ckSecondLvl, ow_str, cndMgr, ow.concat);
+    }
+    
 }
 
 bool TSpellCorrector::ProcessCandidates(context_range_t const & cntxt

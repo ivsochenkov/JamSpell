@@ -188,7 +188,7 @@ private:
     TAlphabet const & GetAlphabet() const noexcept
     { return GetTokenizer().GetAlphabet(); }
 
-    concat_inf_t PeelWord(token_info_t & tinf) const;
+    concat_inf_t PeelWord(token_info_t & tinf, ::std::uint8_t & has_int_pnkt) const;
 
     void InitContextWordFromToken(cntxt_word_t & w) const;
 
@@ -333,8 +333,9 @@ private:
     void ReScore (cand_word_t & w, token_stat_t const ts) const noexcept
     {
         w.score -= m_opt.BadTokenPenalty * (
-            LangModel.TokenIsBad(w.str, ts) ||
-            w.concat.left > 1u || w.concat.right > 2u
+            w.concat.left > 1u || w.concat.right > 2u || ts.int_punct_cnt
+            || LangModel.TokenIsBad(w.str, ts) 
+            
         );
     }
 
