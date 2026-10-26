@@ -146,8 +146,6 @@ public:
             );
     }
 
-    static bool isA(wchar_t const ch, wchar_t const * chrs) noexcept;    
-
     bool isWordToken (token_info_t const & token) const
     {
         return (!token.empty()) && (token.size() < max_word_length) 
