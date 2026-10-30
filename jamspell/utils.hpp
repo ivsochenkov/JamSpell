@@ -89,8 +89,8 @@ struct token_stat_t
                     ,   max_vovel_in_row        = 0u        
                     ,   max_consonant_in_row    = 0u
                     ,   int_punct_cnt           = 0u
+                    ,   title_case_cnt          = 0u
                     ;
-    bool                is_title_case = false;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -359,6 +359,7 @@ struct cntxt_attr_t
 {
     bool                sw_orig_is_known    = false
                     ,   orig_is_known       = false
+                    ,   is_initials         = false;
                     ;
 };
 

@@ -110,11 +110,9 @@ TAlphabet::letter_type TAlphabet::GetSwitched(char const ch) const
 
 struct stat_counter_t
 {
-    explicit stat_counter_t (TAlphabet const & a, bool is_ttl_case = false) noexcept
+    explicit stat_counter_t (TAlphabet const & a) noexcept
     : m_alphabet(a)
-    {
-        ts.is_title_case = is_ttl_case;
-    }
+    {}
 
     void operator () (char const c) noexcept
     {
@@ -143,12 +141,15 @@ struct stat_counter_t
 
     void operator () (wchar_t const wch) 
     {
-        bool const is_pnkt = m_alphabet.isPunct(wch);
-        if(!is_pnkt && ! m_alphabet.isDigit(wch))
+        bool const is_pnct = m_alphabet.isPunct(wch);
+        if(!is_pnct)
         {
-            ts.is_title_case &= m_alphabet.isUpper(wch);
+            ts.title_case_cnt += m_alphabet.isUpper(wch);
         }
-        ts.int_punct_cnt += is_pnkt;
+        else
+        {
+            ++ts.int_punct_cnt;
+        }
     }
 
     token_stat_t get() noexcept
@@ -308,7 +309,7 @@ bool ToAlphabet(TAlphabet const & alphabet
     , token_stat_t & ts
 )
 {
-    stat_counter_t sttcntr(alphabet, true);
+    stat_counter_t sttcntr(alphabet);
     res.resize(src.size(), '\0');
     auto tgt = res.begin();
     for(auto it = src.begin(), e = src.end(); it != e; ++tgt, ++it)

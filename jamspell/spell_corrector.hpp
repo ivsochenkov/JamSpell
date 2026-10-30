@@ -113,7 +113,7 @@ public:
         double      OrigWordIsKnownPenalty      = 18.0      
                 ,   OrigWordIsUnknownPenalty    = 5.0      
                 ,   SecondLvlPenFactor          = 20.0       
-                ,   SecondLvlPenalty            = 10.0       
+                ,   SecondLvlPenalty            = 30.0       
                 ,   SwitchedWordPenalty         = 3.0
                 ,   SwitchedWordIsKnownPenalty  = 15.0
                 ,   BadTokenPenalty             = 50.0
@@ -198,7 +198,12 @@ private:
 
     static sent_end_kind_t endsWithSentEnd(wstr_view_t const & tok_str
         , ::std::size_t cright
+        , ::std::size_t & closing_pnct_cnt
     );
+
+    bool StartsWithTitleCase(context_t::iterator nxt
+        , context_t::iterator const & e
+    ) const noexcept;
 
     bool isSentEnd(context_t::iterator const & b
         , context_t::iterator const & e
@@ -214,7 +219,7 @@ private:
 
     static void AddOrig2Candidates(cntxt_word_t & curr_word);
 
-    void FormCandidates(context_range_t const & context
+    bool FormCandidates(context_range_t const & context
         , ::std::size_t const position
         , fix_attrs_t & fix_attrs
     ) const;
@@ -333,7 +338,8 @@ private:
     void ReScore (cand_word_t & w, token_stat_t const ts) const noexcept
     {
         w.score -= m_opt.BadTokenPenalty * (
-            w.concat.left > 1u || w.concat.right > 2u || ts.int_punct_cnt
+            (!ts.title_case_cnt) &&
+                (w.concat.left > 1u || w.concat.right > 2u || ts.int_punct_cnt)
             || LangModel.TokenIsBad(w.str, ts) 
             
         );

@@ -156,6 +156,11 @@ public:
         return  isOneOf(chr, L"({[\"\'<-");
     }
 
+    static bool isClosingPunct (letter_type const chr) noexcept
+    {
+        return  isOneOf(chr, L")}]\"\'>");
+    }
+
 private:
 
     using impl_type = std::vector<letter_info_t>;

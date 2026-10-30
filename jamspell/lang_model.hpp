@@ -274,7 +274,7 @@ public:
 
     bool TokenIsBad(str_view_t const & alStr, token_stat_t const & ts) const noexcept
     {
-        return (!ts.is_title_case)
+        return (!ts.title_case_cnt)
             && (
                     (alStr.size() >= 2u && ts.consonant_cnt == alStr.size())
                 ||  (alStr.size() > 3u && ts.vowel_cnt == alStr.size())

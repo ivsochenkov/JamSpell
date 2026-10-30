@@ -286,8 +286,14 @@ void TSpellCorrector::InitContextWordFromToken(cntxt_word_t & w) const
             ow.concat.right = 0u;
             return ;
         }
+        if(w.token.stat().int_punct_cnt || w.orig_word.concat.right)
+        {
+            w.attrs.is_initials = TTokenizer::isSurnameInitials(w.token.str());
+        }
 
-        w.orig_word.reset (GetLangModel().GetWordInfo(w.get_peeled()));
+        w.orig_word.reset (GetLangModel().GetWordInfo(
+            !w.attrs.is_initials ? w.get_peeled() : w.orig_word.str
+        ));
 
         return;
     }
@@ -335,12 +341,14 @@ TSpellCorrector::FixSentence(context_range_t const & curr_sent_ctxt ) const
 
 sent_end_kind_t TSpellCorrector::endsWithSentEnd(wstr_view_t const & tok_str
     , ::std::size_t cright
+    , ::std::size_t & closing_pnct_cnt
 )
 {
     sent_end_kind_t sek = sent_end_kind_t::sekNone;
     for (auto t = tok_str.rbegin() ; cright; --cright, ++t)
     {
         wchar_t const wc = *t;
+        closing_pnct_cnt += TAlphabet::isClosingPunct(wc);
         if(TTokenizer::isSoftSentEnd(wc))
         {
             sek = sent_end_kind_t::sekSoft;
@@ -352,6 +360,20 @@ sent_end_kind_t TSpellCorrector::endsWithSentEnd(wstr_view_t const & tok_str
         }
     }
     return sek;    
+}
+
+inline bool TSpellCorrector::StartsWithTitleCase(context_t::iterator nxt
+    , context_t::iterator const & e
+) const noexcept
+{
+    if((nxt -> orig_word.concat.left == nxt -> token.str().size())) 
+    {
+        // just punct
+        return nxt -> orig_word.concat.left == 1u;
+    }
+    return GetAlphabet().isUpper(
+        *(nxt -> token.str().begin() + nxt -> orig_word.concat.left)
+    );
 }
 
 inline bool TSpellCorrector::isSentEnd(context_t::iterator const & b
@@ -366,20 +388,29 @@ inline bool TSpellCorrector::isSentEnd(context_t::iterator const & b
     }
 
     ::std::size_t const cr = b -> orig_word.concat.right;
-    if(!cr)
+    if( (!cr) || b -> attrs.is_initials)
     {
         return false;
     }
     
-    sent_end_kind_t const sek = endsWithSentEnd(b -> token.str(), cr);
+    ::std::size_t clos_pnkt_cnt = 0u;
+    sent_end_kind_t const sek = endsWithSentEnd(b -> token.str(), cr, clos_pnkt_cnt);
     if(sek == sent_end_kind_t::sekNone)
     {
         return false;
     }
+
+    if(sek == sent_end_kind_t::sekSoft)
+    {
+        if(clos_pnkt_cnt)
+        {
+            return true;
+        }
+        return StartsWithTitleCase(nxt, e);
+    }
     
-    return (sek == sent_end_kind_t::sekHard) 
-    ||  // remains only (sek == sent_end_kind_t::sekSoft) &&
-    GetAlphabet().isUpper(*(nxt -> token.str().begin() + nxt -> orig_word.concat.left));
+    // (sek == sent_end_kind_t::sekHard) 
+    return true;        
 }
 
 context_range_t TSpellCorrector::GetNextSent(context_t::iterator const & b
@@ -412,7 +443,7 @@ void TSpellCorrector::AddOrig2Candidates(cntxt_word_t & curr_word)
     curr_word.candidates.emplace_back(curr_word.orig_word);
 }
 
-void TSpellCorrector::FormCandidates(context_range_t const & context
+bool TSpellCorrector::FormCandidates(context_range_t const & context
     , ::std::size_t const position
     , fix_attrs_t & fix_attrs
 ) const
@@ -421,9 +452,9 @@ void TSpellCorrector::FormCandidates(context_range_t const & context
 
     cntxt_word_t & cw = context[position];
     cand_word_t & ow = cw.orig_word;
-    if(!ow.good())
+    if((!ow.good()) || cw.attrs.is_initials)
     {
-        return;
+        return false;
     }
     
     cw.attrs.orig_is_known = !ow.unknown();    
@@ -443,7 +474,7 @@ void TSpellCorrector::FormCandidates(context_range_t const & context
     {
         // word consists of punctuation only
         CheckSwitchedCands(cw, cndMgr);
-        return;
+        return !cndMgr.empty();
     }
     
     if (cw.token.stat().int_punct_cnt)
@@ -457,7 +488,7 @@ void TSpellCorrector::FormCandidates(context_range_t const & context
                 Edits(ckSecondLvl, ow_str, cndMgr, ow.concat);
             }
         }
-        return;
+        return !cndMgr.empty();
     }
     
     if(ow_str.size() > 1u)
@@ -478,7 +509,7 @@ void TSpellCorrector::FormCandidates(context_range_t const & context
     {
         Edits(ckSecondLvl, ow_str, cndMgr, ow.concat);
     }
-    
+    return !cndMgr.empty();    
 }
 
 bool TSpellCorrector::ProcessCandidates(context_range_t const & cntxt
@@ -486,7 +517,10 @@ bool TSpellCorrector::ProcessCandidates(context_range_t const & cntxt
     , fix_attrs_t & fix_attrs
 ) const
 { 
-    FormCandidates(cntxt, pos, fix_attrs);
+    if(!FormCandidates(cntxt, pos, fix_attrs))
+    {
+        return false;
+    }
     Score(fix_attrs, cntxt, pos);
     bool const was_reset = cntxt[pos].reset_best_cand();
     fix_attrs.sw_cnt += cntxt[pos].get_best_cand().was_switched();
@@ -691,7 +725,6 @@ std::size_t TSpellCorrector::Edits2(cand_kind_t const ck
             ((s = word.substr(0, i)) += ' ') += word.substr(i);
             for (auto&& ch: LangModel.GetAlphabet()) 
             {
-                //((s = word.substr(0, i)) += ch) += word.substr(i);
                 s[i] = ch;
                 cnt_added += LookupAndAppend2Candidates(ck, s, candidates, di);
             }
@@ -1009,7 +1042,7 @@ TSpellCorrector
     }
 
     token_stat_t ts {GetAlphabet().CalcTokenStat(cnd.str)};
-    ts.is_title_case = ctx_word.token.stat().is_title_case;
+    ts.title_case_cnt = ctx_word.token.stat().title_case_cnt;
     ReScore(cnd, ts);
     //cnd.score -= std::abs(long(cnd.str.size()) - ctx_word.token.size()) 
     //      * m_opt.LengthMismatchPenaltyFactor;

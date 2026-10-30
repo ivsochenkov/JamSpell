@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 #include <locale>
+#include <regex>
 
 
 namespace NJamSpell 
@@ -74,16 +75,11 @@ private:
     ) const noexcept
     { return areNotSpaced(*curr_tok_it, *next);}  
 
-    
-
     inline bool good4join (text_tokens_const_iterator_t const & a
         , text_tokens_const_iterator_t const & b
         , text_tokens_const_iterator_t const & c
     ) const;
 
-    inline bool good4join(text_tokens_const_iterator_t const& a
-        , text_tokens_const_iterator_t const & b
-    ) const;
 
     tokenizer_type Tokenize(wstr_view_t const & txt
         , sep_type const & sep = sep_type{}
@@ -122,6 +118,14 @@ public:
 
     static bool isHardSentEnd(wchar_t const ch) noexcept
     { return ch == L'!' || ch == L'?'; }
+
+    static bool isSurnameInitials (wstr_view_t const & s)
+    {
+        static std::wregex const rexp( 
+            LR"(^[A-ZА-ЯЁ][a-zа-яё]?\.(?:[A-ZА-ЯЁ][a-zа-яё]?\.){0,2}$)"
+        );
+        return ::std::regex_match(s.begin(), s.end(), rexp);
+    }
 
     template <typename TTokenIt>
     bool isSentBreak(TTokenIt const curr_tok_it, TTokenIt const e) const 
