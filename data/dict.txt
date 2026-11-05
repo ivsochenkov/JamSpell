@@ -84,3 +84,9 @@ awawa
 хряпнуть
 абажур
 .NET
+.com
+.ru
+.org
+.txt
+.exe
+.jpg
