@@ -30,6 +30,8 @@ constexpr double LANG_MODEL_DEFAULT_K = 0.01;
 using str_to_id_map_t = tsl::htrie_map<char, wdata_t
     , str_hasher_t
     , std::uint8_t
+    //, tsl::htrie_policy::bitmap_children
+    //, tsl::htrie_policy::flat_map_children
 >;
 
 class TWord2IdMap : public str_to_id_map_t

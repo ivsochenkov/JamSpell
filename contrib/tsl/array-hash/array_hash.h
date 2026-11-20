@@ -34,6 +34,7 @@
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <new>
 #include <stdexcept>
 #include <type_traits>
 #include <utility>
@@ -54,6 +55,17 @@
 
 #ifdef TSL_AH_HAS_STRING_VIEW
 #include <string_view>
+#endif
+
+/*
+ * Branch hint: keeps the "no bucket" case out of the lookups' critical path
+ * (the compiler may otherwise turn the test into a conditional move, which
+ * makes the address of the bucket depend on a load).
+ */
+#if defined(__GNUC__) || defined(__clang__)
+#define TSL_AH_LIKELY(expr) (__builtin_expect(static_cast<bool>(expr), 1))
+#else
+#define TSL_AH_LIKELY(expr) (expr)
 #endif
 
 #ifdef TSL_DEBUG
@@ -163,6 +175,166 @@ static T deserialize_value(Deserializer& deserializer) {
 }
 
 /**
+ * Raw pointer to the object a (possibly fancy) pointer points to. Fancy
+ * pointers (boost::interprocess::offset_ptr, ...) are what allows the
+ * structures to live in memory that is mapped at different addresses.
+ */
+template <class T>
+inline T* to_raw_pointer(T* ptr) noexcept {
+  return ptr;
+}
+
+template <class Pointer>
+inline typename std::pointer_traits<Pointer>::element_type* to_raw_pointer(
+    const Pointer& ptr) noexcept {
+  return !ptr ? nullptr : std::addressof(*ptr);
+}
+
+template <class Allocator, class U>
+using rebind_alloc_t =
+    typename std::allocator_traits<Allocator>::template rebind_alloc<U>;
+
+/**
+ * Stores an allocator, without taking any space if it is stateless (empty base
+ * optimization).
+ */
+template <class Allocator, bool = std::is_empty<Allocator>::value>
+class allocator_storage : private Allocator {
+ public:
+  explicit allocator_storage(const Allocator& alloc) : Allocator(alloc) {}
+
+  Allocator& char_alloc() noexcept { return *this; }
+  const Allocator& char_alloc() const noexcept { return *this; }
+};
+
+template <class Allocator>
+class allocator_storage<Allocator, false> {
+ public:
+  explicit allocator_storage(const Allocator& alloc) : m_alloc(alloc) {}
+
+  Allocator& char_alloc() noexcept { return m_alloc; }
+  const Allocator& char_alloc() const noexcept { return m_alloc; }
+
+ private:
+  Allocator m_alloc;
+};
+
+/**
+ * Allocation of the buffers of the buckets.
+ *
+ * A buffer always has exactly the size needed by its entries plus the end of
+ * bucket marker (that's how deallocate can be given the right size, as the
+ * allocator requires), so the operations that change the size of a buffer
+ * allocate a new one. A buffer is never modified when an operation fails.
+ */
+template <class CharT, class CharAllocator>
+struct bucket_memory {
+  using traits = std::allocator_traits<CharAllocator>;
+  using pointer = typename traits::pointer;
+
+  static constexpr bool NEEDS_SIZE_ON_DEALLOCATE = true;
+
+  static pointer allocate(CharAllocator& alloc, std::size_t units) {
+    return traits::allocate(alloc, units);
+  }
+
+  static void deallocate(CharAllocator& alloc, pointer ptr,
+                         std::size_t units) noexcept {
+    traits::deallocate(alloc, ptr, units);
+  }
+
+  /**
+   * New buffer of new_units CharT whose first old_units CharT are the ones of
+   * old_buffer, which is deallocated.
+   */
+  static pointer reallocate(CharAllocator& alloc, pointer old_buffer,
+                            std::size_t old_units, std::size_t new_units) {
+    tsl_ah_assert(new_units >= old_units);
+
+    pointer new_buffer = traits::allocate(alloc, new_units);
+    std::memcpy(to_raw_pointer(new_buffer), to_raw_pointer(old_buffer),
+                old_units * sizeof(CharT));
+    traits::deallocate(alloc, old_buffer, old_units);
+
+    return new_buffer;
+  }
+
+  /**
+   * New buffer of old_units - erase_units CharT which is old_buffer without
+   * the erase_units CharT starting at erase_offset. old_buffer is deallocated.
+   */
+  static pointer erase_units(CharAllocator& alloc, pointer old_buffer,
+                             std::size_t old_units, std::size_t erase_offset,
+                             std::size_t erase_units) {
+    tsl_ah_assert(erase_offset + erase_units <= old_units);
+
+    pointer new_buffer = traits::allocate(alloc, old_units - erase_units);
+
+    CharT* dst = to_raw_pointer(new_buffer);
+    const CharT* src = to_raw_pointer(old_buffer);
+    std::memcpy(dst, src, erase_offset * sizeof(CharT));
+    std::memcpy(dst + erase_offset, src + erase_offset + erase_units,
+                (old_units - erase_offset - erase_units) * sizeof(CharT));
+
+    traits::deallocate(alloc, old_buffer, old_units);
+
+    return new_buffer;
+  }
+};
+
+/**
+ * std::allocator: use std::malloc, std::realloc and std::free instead of new
+ * and delete so we can have access to std::realloc (grow or shrink the buffer
+ * in place when possible).
+ */
+template <class CharT, class U>
+struct bucket_memory<CharT, std::allocator<U>> {
+  using pointer = CharT*;
+
+  static constexpr bool NEEDS_SIZE_ON_DEALLOCATE = false;
+
+  static pointer allocate(std::allocator<U>&, std::size_t units) {
+    pointer buffer = static_cast<CharT*>(std::malloc(units * sizeof(CharT)));
+    if (buffer == nullptr) {
+      throw std::bad_alloc();
+    }
+
+    return buffer;
+  }
+
+  static void deallocate(std::allocator<U>&, pointer ptr,
+                         std::size_t /*units*/) noexcept {
+    std::free(ptr);
+  }
+
+  static pointer reallocate(std::allocator<U>&, pointer old_buffer,
+                            std::size_t /*old_units*/, std::size_t new_units) {
+    pointer new_buffer = static_cast<CharT*>(
+        std::realloc(old_buffer, new_units * sizeof(CharT)));
+    if (new_buffer == nullptr) {
+      throw std::bad_alloc();
+    }
+
+    return new_buffer;
+  }
+
+  static pointer erase_units(std::allocator<U>&, pointer old_buffer,
+                             std::size_t old_units, std::size_t erase_offset,
+                             std::size_t erase_units) {
+    tsl_ah_assert(erase_offset + erase_units <= old_units);
+
+    std::memmove(old_buffer + erase_offset,
+                 old_buffer + erase_offset + erase_units,
+                 (old_units - erase_offset - erase_units) * sizeof(CharT));
+
+    // Shrinking should not fail, but if it does the old buffer is still valid.
+    pointer new_buffer = static_cast<CharT*>(
+        std::realloc(old_buffer, (old_units - erase_units) * sizeof(CharT)));
+    return (new_buffer != nullptr) ? new_buffer : old_buffer;
+  }
+};
+
+/**
  * For each string in the bucket, store the size of the string, the chars of the
  * string and T, if it's not void. T should be either void or an unsigned type.
  *
@@ -179,11 +351,13 @@ static T deserialize_value(Deserializer& deserializer) {
  * KeySizeT and T are extended to be a multiple of CharT when stored in the
  * buffer.
  *
- * Use std::malloc and std::free instead of new and delete so we can have access
- * to std::realloc.
+ * The memory of the buffer comes from CharAllocator (see bucket_memory). The
+ * bucket doesn't store the allocator (it would double its size), the owner of
+ * the bucket gives it to the methods that allocate/deallocate and has to call
+ * clear(alloc) before the bucket is destroyed.
  */
 template <class CharT, class T, class KeyEqual, class KeySizeT,
-          bool StoreNullTerminator>
+          bool StoreNullTerminator, class CharAllocator>
 class array_bucket {
   template <typename U>
   using has_mapped_type =
@@ -206,7 +380,13 @@ class array_bucket {
   using key_equal = KeyEqual;
   using iterator = array_bucket_iterator<false>;
   using const_iterator = array_bucket_iterator<true>;
+  using char_allocator = CharAllocator;
 
+ private:
+  using memory = bucket_memory<CharT, CharAllocator>;
+  using buffer_pointer = typename memory::pointer;
+
+ public:
   static_assert(sizeof(KeySizeT) <= sizeof(size_type),
                 "sizeof(KeySizeT) should be <= sizeof(std::size_t;)");
   static_assert(std::is_unsigned<size_type>::value, "");
@@ -362,54 +542,38 @@ class array_bucket {
   static const_iterator cend_it() noexcept { return const_iterator(nullptr); }
 
  public:
-  array_bucket() : m_buffer(nullptr) {}
+  array_bucket() noexcept : m_buffer() {}
 
   /**
-   * Reserve 'size' in the buffer of the bucket. The created bucket is empty.
+   * Reserve 'reserved_bytes' (the sum of entry_required_bytes of the entries
+   * that will be added) in the buffer of the bucket. The created bucket is
+   * empty.
    */
-  array_bucket(std::size_t size) : m_buffer(nullptr) {
-    if (size == 0) {
+  array_bucket(CharAllocator& alloc, size_type reserved_bytes) : m_buffer() {
+    if (reserved_bytes == 0) {
       return;
     }
 
-    m_buffer = static_cast<CharT*>(std::malloc(
-        size * sizeof(CharT) + sizeof_in_buff<decltype(END_OF_BUCKET)>()));
-    if (m_buffer == nullptr) {
-      throw std::bad_alloc();
-    }
+    m_buffer = memory::allocate(alloc, reserved_bytes / sizeof(CharT) +
+                                           size_as_char_t<key_size_type>());
 
-    const auto end_of_bucket = END_OF_BUCKET;
-    std::memcpy(m_buffer, &end_of_bucket, sizeof(end_of_bucket));
+    const key_size_type end_of_bucket = END_OF_BUCKET;
+    std::memcpy(buf(), &end_of_bucket, sizeof(end_of_bucket));
   }
 
-  ~array_bucket() { clear(); }
-
-  array_bucket(const array_bucket& other) {
-    if (other.m_buffer == nullptr) {
-      m_buffer = nullptr;
-      return;
-    }
-
-    const size_type other_buffer_size = other.size();
-    m_buffer = static_cast<CharT*>(
-        std::malloc(other_buffer_size * sizeof(CharT) +
-                    sizeof_in_buff<decltype(END_OF_BUCKET)>()));
-    if (m_buffer == nullptr) {
-      throw std::bad_alloc();
-    }
-
-    std::memcpy(m_buffer, other.m_buffer, other_buffer_size * sizeof(CharT));
-
-    const auto end_of_bucket = END_OF_BUCKET;
-    std::memcpy(m_buffer + other_buffer_size, &end_of_bucket,
-                sizeof(end_of_bucket));
+  ~array_bucket() {
+    // The owner has to call clear(alloc).
+    tsl_ah_assert(!m_buffer);
   }
+
+  array_bucket(const array_bucket& other) = delete;
+  array_bucket& operator=(const array_bucket& other) = delete;
 
   array_bucket(array_bucket&& other) noexcept : m_buffer(other.m_buffer) {
-    other.m_buffer = nullptr;
+    other.m_buffer = buffer_pointer();
   }
 
-  array_bucket& operator=(array_bucket other) noexcept {
+  array_bucket& operator=(array_bucket&& other) noexcept {
     other.swap(*this);
 
     return *this;
@@ -419,11 +583,27 @@ class array_bucket {
     std::swap(m_buffer, other.m_buffer);
   }
 
-  iterator begin() noexcept { return iterator(m_buffer); }
+  /**
+   * Copy of the bucket allocated with alloc.
+   */
+  array_bucket clone(CharAllocator& alloc) const {
+    array_bucket result;
+    if (!m_buffer) {
+      return result;
+    }
+
+    const size_type units = size() + size_as_char_t<key_size_type>();
+    result.m_buffer = memory::allocate(alloc, units);
+    std::memcpy(result.buf(), buf(), units * sizeof(CharT));
+
+    return result;
+  }
+
+  iterator begin() noexcept { return iterator(buf()); }
   iterator end() noexcept { return iterator(nullptr); }
   const_iterator begin() const noexcept { return cbegin(); }
   const_iterator end() const noexcept { return cend(); }
-  const_iterator cbegin() const noexcept { return const_iterator(m_buffer); }
+  const_iterator cbegin() const noexcept { return const_iterator(buf()); }
   const_iterator cend() const noexcept { return const_iterator(nullptr); }
 
   /**
@@ -436,11 +616,11 @@ class array_bucket {
    */
   std::pair<const_iterator, bool> find_or_end_of_bucket(
       const CharT* key, size_type key_size) const noexcept {
-    if (m_buffer == nullptr) {
+    if (!m_buffer) {
       return std::make_pair(cend(), false);
     }
 
-    const CharT* buffer_ptr_in_out = m_buffer;
+    const CharT* buffer_ptr_in_out = buf();
     const bool found =
         find_or_end_of_bucket_impl(key, key_size, buffer_ptr_in_out);
 
@@ -456,42 +636,34 @@ class array_bucket {
    * Return the position where the element was actually inserted.
    */
   template <class... ValueArgs>
-  const_iterator append(const_iterator end_of_bucket, const CharT* key,
-                        size_type key_size, ValueArgs&&... value) {
+  const_iterator append(CharAllocator& alloc, const_iterator end_of_bucket,
+                        const CharT* key, size_type key_size,
+                        ValueArgs&&... value) {
     const key_size_type key_sz = as_key_size_type(key_size);
 
     if (end_of_bucket == cend()) {
-      tsl_ah_assert(m_buffer == nullptr);
+      tsl_ah_assert(!m_buffer);
 
-      const size_type buffer_size = entry_required_bytes(key_sz) +
-                                    sizeof_in_buff<decltype(END_OF_BUCKET)>();
+      const size_type buffer_units =
+          entry_required_bytes(key_sz) / sizeof(CharT) +
+          size_as_char_t<key_size_type>();
 
-      m_buffer = static_cast<CharT*>(std::malloc(buffer_size));
-      if (m_buffer == nullptr) {
-        throw std::bad_alloc();
-      }
+      m_buffer = memory::allocate(alloc, buffer_units);
+      append_impl(key, key_sz, buf(), std::forward<ValueArgs>(value)...);
 
-      append_impl(key, key_sz, m_buffer, std::forward<ValueArgs>(value)...);
-
-      return const_iterator(m_buffer);
+      return const_iterator(buf());
     } else {
       tsl_ah_assert(is_end_of_bucket(end_of_bucket.m_position));
 
-      const size_type current_size =
-          ((end_of_bucket.m_position +
-            size_as_char_t<decltype(END_OF_BUCKET)>()) -
-           m_buffer) *
-          sizeof(CharT);
-      const size_type new_size = current_size + entry_required_bytes(key_sz);
+      const size_type current_units = size_type(
+          (end_of_bucket.m_position + size_as_char_t<key_size_type>()) - buf());
+      const size_type new_units =
+          current_units + entry_required_bytes(key_sz) / sizeof(CharT);
 
-      CharT* new_buffer = static_cast<CharT*>(std::realloc(m_buffer, new_size));
-      if (new_buffer == nullptr) {
-        throw std::bad_alloc();
-      }
-      m_buffer = new_buffer;
+      m_buffer = memory::reallocate(alloc, m_buffer, current_units, new_units);
 
-      CharT* buffer_append_pos = m_buffer + current_size / sizeof(CharT) -
-                                 size_as_char_t<decltype(END_OF_BUCKET)>();
+      CharT* buffer_append_pos =
+          buf() + current_units - size_as_char_t<key_size_type>();
       append_impl(key, key_sz, buffer_append_pos,
                   std::forward<ValueArgs>(value)...);
 
@@ -499,48 +671,54 @@ class array_bucket {
     }
   }
 
-  const_iterator erase(const_iterator position) noexcept {
+  const_iterator erase(CharAllocator& alloc, const_iterator position) {
     tsl_ah_assert(position.m_position != nullptr &&
                   !is_end_of_bucket(position.m_position));
 
+    CharT* buffer = buf();
+
     // get mutable pointers
-    CharT* start_entry = m_buffer + (position.m_position - m_buffer);
-    CharT* start_next_entry =
-        start_entry + entry_size_bytes(start_entry) / sizeof(CharT);
+    CharT* start_entry = buffer + (position.m_position - buffer);
+    const size_type entry_units = entry_size_bytes(start_entry) / sizeof(CharT);
+    CharT* start_next_entry = start_entry + entry_units;
 
     CharT* end_buffer_ptr = start_next_entry;
     while (!is_end_of_bucket(end_buffer_ptr)) {
       end_buffer_ptr += entry_size_bytes(end_buffer_ptr) / sizeof(CharT);
     }
-    end_buffer_ptr += size_as_char_t<decltype(END_OF_BUCKET)>();
+    end_buffer_ptr += size_as_char_t<key_size_type>();
 
-    const size_type size_to_move =
-        (end_buffer_ptr - start_next_entry) * sizeof(CharT);
-    std::memmove(start_entry, start_next_entry, size_to_move);
+    const size_type old_units = size_type(end_buffer_ptr - buffer);
+    const size_type start_offset = size_type(start_entry - buffer);
 
-    if (is_end_of_bucket(m_buffer)) {
-      clear();
+    if (start_offset == 0 && is_end_of_bucket(start_next_entry)) {
+      // Last element of the bucket
+      memory::deallocate(alloc, m_buffer, old_units);
+      m_buffer = buffer_pointer();
+
       return cend();
-    } else if (is_end_of_bucket(start_entry)) {
-      return cend();
-    } else {
-      return const_iterator(start_entry);
     }
+
+    m_buffer = memory::erase_units(alloc, m_buffer, old_units, start_offset,
+                                   entry_units);
+
+    CharT* next_entry = buf() + start_offset;
+    return is_end_of_bucket(next_entry) ? cend() : const_iterator(next_entry);
   }
 
   /**
    * Return true if an element has been erased
    */
-  bool erase(const CharT* key, size_type key_size) noexcept {
-    if (m_buffer == nullptr) {
+  bool erase(CharAllocator& alloc, const CharT* key, size_type key_size) {
+    if (!m_buffer) {
       return false;
     }
 
-    const CharT* entry_buffer_ptr_in_out = m_buffer;
+    const CharT* entry_buffer_ptr_in_out = buf();
     bool found =
         find_or_end_of_bucket_impl(key, key_size, entry_buffer_ptr_in_out);
     if (found) {
-      erase(const_iterator(entry_buffer_ptr_in_out));
+      erase(alloc, const_iterator(entry_buffer_ptr_in_out));
 
       return true;
     } else {
@@ -555,7 +733,7 @@ class array_bucket {
   template <class... ValueArgs>
   void append_in_reserved_bucket_no_check(const CharT* key, size_type key_size,
                                           ValueArgs&&... value) noexcept {
-    CharT* buffer_ptr = m_buffer;
+    CharT* buffer_ptr = buf();
     while (!is_end_of_bucket(buffer_ptr)) {
       buffer_ptr += entry_size_bytes(buffer_ptr) / sizeof(CharT);
     }
@@ -564,30 +742,38 @@ class array_bucket {
                 std::forward<ValueArgs>(value)...);
   }
 
-  bool empty() const noexcept {
-    return m_buffer == nullptr || is_end_of_bucket(m_buffer);
-  }
+  bool empty() const noexcept { return !m_buffer || is_end_of_bucket(buf()); }
 
-  void clear() noexcept {
-    std::free(m_buffer);
-    m_buffer = nullptr;
+  /**
+   * Release the buffer. Has to be called before the destruction of a bucket
+   * that holds one, with the allocator that allocated it.
+   */
+  void clear(CharAllocator& alloc) noexcept {
+    if (m_buffer) {
+      memory::deallocate(alloc, m_buffer,
+                         memory::NEEDS_SIZE_ON_DEALLOCATE
+                             ? size() + size_as_char_t<key_size_type>()
+                             : 0);
+      m_buffer = buffer_pointer();
+    }
   }
 
   iterator mutable_iterator(const_iterator pos) noexcept {
-    return iterator(m_buffer + (pos.m_position - m_buffer));
+    return iterator(buf() + (pos.m_position - buf()));
   }
 
   template <class Serializer>
   void serialize(Serializer& serializer) const {
     const slz_size_type bucket_size = size();
-    tsl_ah_assert(m_buffer != nullptr || bucket_size == 0);
+    tsl_ah_assert(m_buffer || bucket_size == 0);
 
     serializer(bucket_size);
-    serializer(m_buffer, bucket_size);
+    serializer(buf(), bucket_size);
   }
 
   template <class Deserializer>
-  static array_bucket deserialize(Deserializer& deserializer) {
+  static array_bucket deserialize(CharAllocator& alloc,
+                                  Deserializer& deserializer) {
     array_bucket bucket;
     const slz_size_type bucket_size_ds =
         deserialize_value<slz_size_type>(deserializer);
@@ -598,17 +784,19 @@ class array_bucket {
 
     const std::size_t bucket_size = numeric_cast<std::size_t>(
         bucket_size_ds, "Deserialized bucket_size is too big.");
-    bucket.m_buffer = static_cast<CharT*>(
-        std::malloc(bucket_size * sizeof(CharT) +
-                    sizeof_in_buff<decltype(END_OF_BUCKET)>()));
-    if (bucket.m_buffer == nullptr) {
-      throw std::bad_alloc();
+    const size_type units = bucket_size + size_as_char_t<key_size_type>();
+
+    bucket.m_buffer = memory::allocate(alloc, units);
+    try {
+      deserializer(bucket.buf(), bucket_size);
+    } catch (...) {
+      memory::deallocate(alloc, bucket.m_buffer, units);
+      bucket.m_buffer = buffer_pointer();
+      throw;
     }
 
-    deserializer(bucket.m_buffer, bucket_size);
-
-    const auto end_of_bucket = END_OF_BUCKET;
-    std::memcpy(bucket.m_buffer + bucket_size, &end_of_bucket,
+    const key_size_type end_of_bucket = END_OF_BUCKET;
+    std::memcpy(bucket.buf() + bucket_size, &end_of_bucket,
                 sizeof(end_of_bucket));
 
     tsl_ah_assert(bucket.size() == bucket_size);
@@ -670,8 +858,8 @@ class array_bucket {
             typename std::enable_if<has_mapped_type<U>::value>::type* = nullptr>
   void append_impl(
       const CharT* key, key_size_type key_size, CharT* buffer_append_pos,
-      typename array_bucket<CharT, U, KeyEqual, KeySizeT,
-                            StoreNullTerminator>::mapped_type value) noexcept {
+      typename array_bucket<CharT, U, KeyEqual, KeySizeT, StoreNullTerminator,
+                            CharAllocator>::mapped_type value) noexcept {
     std::memcpy(buffer_append_pos, &key_size, sizeof(key_size));
     buffer_append_pos += size_as_char_t<key_size_type>();
 
@@ -695,24 +883,26 @@ class array_bucket {
    * thus in O(n).
    */
   size_type size() const noexcept {
-    if (m_buffer == nullptr) {
+    if (!m_buffer) {
       return 0;
     }
 
-    CharT* buffer_ptr = m_buffer;
+    const CharT* buffer_ptr = buf();
     while (!is_end_of_bucket(buffer_ptr)) {
       buffer_ptr += entry_size_bytes(buffer_ptr) / sizeof(CharT);
     }
 
-    return buffer_ptr - m_buffer;
+    return size_type(buffer_ptr - buf());
   }
+
+  CharT* buf() const noexcept { return to_raw_pointer(m_buffer); }
 
  private:
   static const key_size_type END_OF_BUCKET =
       std::numeric_limits<key_size_type>::max();
   static const key_size_type KEY_EXTRA_SIZE = StoreNullTerminator ? 1 : 0;
 
-  CharT* m_buffer;
+  buffer_pointer m_buffer;
 
  public:
   static const key_size_type MAX_KEY_SIZE =
@@ -721,34 +911,66 @@ class array_bucket {
                     1);
 };
 
-template <class T>
+template <class T, class CharAllocator>
 class value_container {
+ protected:
+  using value_allocator = rebind_alloc_t<CharAllocator, T>;
+
  public:
+  explicit value_container(const CharAllocator& alloc)
+      : m_values(value_allocator(alloc)) {}
+
+  value_container(const value_container& other, const CharAllocator& alloc)
+      : m_values(other.m_values, value_allocator(alloc)) {}
+
+  value_container(const value_container& other) = default;
+  value_container(value_container&& other) = default;
+  value_container& operator=(const value_container& other) = default;
+  value_container& operator=(value_container&& other) = default;
+
   void clear() noexcept { m_values.clear(); }
 
   void reserve(std::size_t new_cap) { m_values.reserve(new_cap); }
 
   void shrink_to_fit() { m_values.shrink_to_fit(); }
 
-  friend void swap(value_container& lhs, value_container& rhs) {
-    lhs.m_values.swap(rhs.m_values);
+  /**
+   * Exchange the values and the allocator, whether the allocator propagates on
+   * swap or not.
+   */
+  void swap_with_allocator(value_container& other) noexcept {
+    using vector_type = decltype(m_values);
+
+    vector_type tmp(std::move(m_values));
+    m_values.~vector_type();
+    ::new (static_cast<void*>(std::addressof(m_values)))
+        vector_type(std::move(other.m_values));
+    other.m_values.~vector_type();
+    ::new (static_cast<void*>(std::addressof(other.m_values)))
+        vector_type(std::move(tmp));
   }
 
  protected:
   static constexpr float VECTOR_GROWTH_RATE = 1.5f;
 
   // TODO use a sparse array? or a std::deque
-  std::vector<T> m_values;
+  std::vector<T, value_allocator> m_values;
 };
 
-template <>
-class value_container<void> {
+template <class CharAllocator>
+class value_container<void, CharAllocator> {
  public:
+  explicit value_container(const CharAllocator& /*alloc*/) {}
+  value_container(const value_container& /*other*/,
+                  const CharAllocator& /*alloc*/) {}
+
   void clear() noexcept {}
 
   void shrink_to_fit() {}
 
   void reserve(std::size_t /*new_cap*/) {}
+
+  void swap_with_allocator(value_container& /*other*/) noexcept {}
 };
 
 /**
@@ -760,13 +982,20 @@ class value_container<void> {
  *
  * The number of elements in the map is limited to
  * std::numeric_limits<IndexSizeT>::max().
+ *
+ * All the memory (buckets, buffers of the buckets, values) is allocated through
+ * Allocator, which can be stateful and use fancy pointers: the only pointers
+ * stored in the structure are Allocator::pointer ones, so it can be placed in
+ * memory mapped at different addresses (shared memory, memory mapped files).
+ * Iterators are plain C++ objects and must not be shared.
  */
 template <class CharT, class T, class Hash, class KeyEqual,
           bool StoreNullTerminator, class KeySizeT, class IndexSizeT,
-          class GrowthPolicy>
-class array_hash : private value_container<T>,
+          class GrowthPolicy, class Allocator = std::allocator<CharT>>
+class array_hash : private value_container<T, rebind_alloc_t<Allocator, CharT>>,
                    private Hash,
-                   private GrowthPolicy {
+                   private GrowthPolicy,
+                   private allocator_storage<rebind_alloc_t<Allocator, CharT>> {
  private:
   template <typename U>
   using has_mapped_type =
@@ -777,11 +1006,20 @@ class array_hash : private value_container<T>,
    * value_container class and we store an index to m_values in the bucket. The
    * index is of type IndexSizeT.
    */
+  using char_allocator = rebind_alloc_t<Allocator, CharT>;
+  using char_alloc_traits = std::allocator_traits<char_allocator>;
+  using value_container_type = value_container<T, char_allocator>;
+  using allocator_storage_type = allocator_storage<char_allocator>;
+
   using array_bucket = tsl::detail_array_hash::array_bucket<
       CharT,
       typename std::conditional<has_mapped_type<T>::value, IndexSizeT,
                                 void>::type,
-      KeyEqual, KeySizeT, StoreNullTerminator>;
+      KeyEqual, KeySizeT, StoreNullTerminator, char_allocator>;
+
+  using bucket_allocator = rebind_alloc_t<Allocator, array_bucket>;
+  using bucket_alloc_traits = std::allocator_traits<bucket_allocator>;
+  using bucket_pointer = typename bucket_alloc_traits::pointer;
 
  public:
   template <bool IsConst>
@@ -793,6 +1031,7 @@ class array_hash : private value_container<T>,
   using size_type = std::size_t;
   using hasher = Hash;
   using key_equal = KeyEqual;
+  using allocator_type = Allocator;
   using iterator = array_hash_iterator<false>;
   using const_iterator = array_hash_iterator<true>;
 
@@ -807,9 +1046,9 @@ class array_hash : private value_container<T>,
    private:
     using iterator_array_bucket = typename array_bucket::const_iterator;
 
-    using iterator_buckets = typename std::conditional<
-        IsConst, typename std::vector<array_bucket>::const_iterator,
-        typename std::vector<array_bucket>::iterator>::type;
+    using iterator_buckets =
+        typename std::conditional<IsConst, const array_bucket*,
+                                  array_bucket*>::type;
 
     using array_hash_ptr = typename std::conditional<IsConst, const array_hash*,
                                                      array_hash*>::type;
@@ -840,7 +1079,10 @@ class array_hash : private value_container<T>,
     }
 
    public:
-    array_hash_iterator() noexcept : m_array_hash(nullptr) {}
+    array_hash_iterator() noexcept
+        : m_buckets_iterator(),
+          m_array_bucket_iterator(),
+          m_array_hash(nullptr) {}
 
     template <bool TIsConst = IsConst,
               typename std::enable_if<TIsConst>::type* = nullptr>
@@ -883,17 +1125,17 @@ class array_hash : private value_container<T>,
     }
 
     array_hash_iterator& operator++() {
-      tsl_ah_assert(m_buckets_iterator != m_array_hash->m_buckets_data.end());
+      tsl_ah_assert(m_buckets_iterator != m_array_hash->buckets_end());
       tsl_ah_assert(m_array_bucket_iterator != m_buckets_iterator->cend());
 
       ++m_array_bucket_iterator;
       if (m_array_bucket_iterator == m_buckets_iterator->cend()) {
         do {
           ++m_buckets_iterator;
-        } while (m_buckets_iterator != m_array_hash->m_buckets_data.end() &&
+        } while (m_buckets_iterator != m_array_hash->buckets_end() &&
                  m_buckets_iterator->empty());
 
-        if (m_buckets_iterator != m_array_hash->m_buckets_data.end()) {
+        if (m_buckets_iterator != m_array_hash->buckets_end()) {
           m_array_bucket_iterator = m_buckets_iterator->cbegin();
         }
       }
@@ -935,74 +1177,130 @@ class array_hash : private value_container<T>,
   };
 
  public:
-  array_hash(size_type bucket_count, const Hash& hash, float max_load_factor)
-      : value_container<T>(),
+  array_hash(size_type bucket_count, const Hash& hash, float max_load_factor,
+             const Allocator& alloc = Allocator())
+      : value_container_type(char_allocator(alloc)),
         Hash(hash),
         GrowthPolicy(bucket_count),
-        m_buckets_data(bucket_count > max_bucket_count()
-                           ? throw std::length_error(
-                                 "The map exceeds its maximum bucket count.")
-                           : bucket_count),
-        m_buckets(m_buckets_data.empty() ? static_empty_bucket_ptr()
-                                         : m_buckets_data.data()),
+        allocator_storage_type(char_allocator(alloc)),
+        m_buckets(),
+        m_bucket_count(0),
         m_nb_elements(0) {
+    if (bucket_count > max_bucket_count()) {
+      throw std::length_error("The map exceeds its maximum bucket count.");
+    }
+
+    m_buckets = allocate_bucket_array(bucket_count);
+    m_bucket_count = bucket_count;
+
     this->max_load_factor(max_load_factor);
   }
 
   array_hash(const array_hash& other)
-      : value_container<T>(other),
+      : array_hash(other,
+                   char_alloc_traits::select_on_container_copy_construction(
+                       other.char_alloc())) {}
+
+  array_hash(const array_hash& other, const Allocator& alloc)
+      : value_container_type(other, char_allocator(alloc)),
         Hash(other),
         GrowthPolicy(other),
-        m_buckets_data(other.m_buckets_data),
-        m_buckets(m_buckets_data.empty() ? static_empty_bucket_ptr()
-                                         : m_buckets_data.data()),
-        m_nb_elements(other.m_nb_elements),
-        m_max_load_factor(other.m_max_load_factor),
-        m_load_threshold(other.m_load_threshold) {}
-
-  array_hash(array_hash&& other) noexcept(
-      std::is_nothrow_move_constructible<value_container<T>>::value&&
-          std::is_nothrow_move_constructible<Hash>::value&&
-              std::is_nothrow_move_constructible<GrowthPolicy>::value&&
-                  std::is_nothrow_move_constructible<
-                      std::vector<array_bucket>>::value)
-      : value_container<T>(std::move(other)),
-        Hash(std::move(other)),
-        GrowthPolicy(std::move(other)),
-        m_buckets_data(std::move(other.m_buckets_data)),
-        m_buckets(m_buckets_data.empty() ? static_empty_bucket_ptr()
-                                         : m_buckets_data.data()),
+        allocator_storage_type(char_allocator(alloc)),
+        m_buckets(),
+        m_bucket_count(0),
         m_nb_elements(other.m_nb_elements),
         m_max_load_factor(other.m_max_load_factor),
         m_load_threshold(other.m_load_threshold) {
-    other.value_container<T>::clear();
+    m_buckets = copy_bucket_array(other);
+    m_bucket_count = other.m_bucket_count;
+  }
+
+  /**
+   * Take the content of other if the allocators are equal, otherwise move the
+   * elements one by one in the memory of alloc (which also works for values
+   * that are not copyable).
+   */
+  array_hash(array_hash&& other, const Allocator& alloc)
+      : value_container_type(char_allocator(alloc)),
+        Hash(other),
+        GrowthPolicy(other),
+        allocator_storage_type(char_allocator(alloc)),
+        m_buckets(),
+        m_bucket_count(0),
+        m_nb_elements(0),
+        m_max_load_factor(other.m_max_load_factor),
+        m_load_threshold(0) {
+    if (this->char_alloc() == other.char_alloc()) {
+      static_cast<value_container_type&>(*this) =
+          std::move(static_cast<value_container_type&>(other));
+      m_buckets = other.m_buckets;
+      m_bucket_count = other.m_bucket_count;
+      m_nb_elements = other.m_nb_elements;
+      m_load_threshold = other.m_load_threshold;
+
+      other.value_container_type::clear();
+      other.GrowthPolicy::clear();
+      other.m_buckets = bucket_pointer();
+      other.m_bucket_count = 0;
+      other.m_nb_elements = 0;
+      other.m_load_threshold = 0;
+    } else {
+      move_elements_from(other);
+    }
+  }
+
+  array_hash(array_hash&& other) noexcept(
+      std::is_nothrow_move_constructible<value_container_type>::value &&
+      std::is_nothrow_move_constructible<Hash>::value &&
+      std::is_nothrow_move_constructible<GrowthPolicy>::value)
+      : value_container_type(std::move(other)),
+        Hash(std::move(other)),
+        GrowthPolicy(std::move(other)),
+        allocator_storage_type(other.char_alloc()),
+        m_buckets(other.m_buckets),
+        m_bucket_count(other.m_bucket_count),
+        m_nb_elements(other.m_nb_elements),
+        m_max_load_factor(other.m_max_load_factor),
+        m_load_threshold(other.m_load_threshold) {
+    other.value_container_type::clear();
     other.GrowthPolicy::clear();
-    other.m_buckets_data.clear();
-    other.m_buckets = static_empty_bucket_ptr();
+    other.m_buckets = bucket_pointer();
+    other.m_bucket_count = 0;
     other.m_nb_elements = 0;
     other.m_load_threshold = 0;
   }
 
+  ~array_hash() { release_bucket_array(m_buckets, m_bucket_count); }
+
+  /**
+   * Same allocator propagation rules as the standard containers.
+   */
   array_hash& operator=(const array_hash& other) {
     if (&other != this) {
-      value_container<T>::operator=(other);
-      Hash::operator=(other);
-      GrowthPolicy::operator=(other);
-
-      m_buckets_data = other.m_buckets_data;
-      m_buckets = m_buckets_data.empty() ? static_empty_bucket_ptr()
-                                         : m_buckets_data.data();
-      m_nb_elements = other.m_nb_elements;
-      m_max_load_factor = other.m_max_load_factor;
-      m_load_threshold = other.m_load_threshold;
+      array_hash tmp(
+          other,
+          Allocator(
+              char_alloc_traits::propagate_on_container_copy_assignment::value
+                  ? other.char_alloc()
+                  : this->char_alloc()));
+      tmp.swap_with_allocator(*this);
     }
 
     return *this;
   }
 
   array_hash& operator=(array_hash&& other) {
-    other.swap(*this);
-    other.clear();
+    if (&other != this) {
+      if (char_alloc_traits::propagate_on_container_move_assignment::value ||
+          this->char_alloc() == other.char_alloc()) {
+        array_hash tmp(std::move(other));
+        tmp.swap_with_allocator(*this);
+      } else {
+        // Can't take the memory of other, move the elements
+        array_hash tmp(std::move(other), Allocator(this->char_alloc()));
+        tmp.swap_with_allocator(*this);
+      }
+    }
 
     return *this;
   }
@@ -1011,37 +1309,37 @@ class array_hash : private value_container<T>,
    * Iterators
    */
   iterator begin() noexcept {
-    auto begin = m_buckets_data.begin();
-    while (begin != m_buckets_data.end() && begin->empty()) {
+    array_bucket* begin = buckets_data();
+    array_bucket* end = buckets_end();
+    while (begin != end && begin->empty()) {
       ++begin;
     }
 
-    return (begin != m_buckets_data.end())
-               ? iterator(begin, begin->cbegin(), this)
-               : end();
+    return (begin != end) ? iterator(begin, begin->cbegin(), this)
+                          : this->end();
   }
 
   const_iterator begin() const noexcept { return cbegin(); }
 
   const_iterator cbegin() const noexcept {
-    auto begin = m_buckets_data.cbegin();
-    while (begin != m_buckets_data.cend() && begin->empty()) {
+    const array_bucket* begin = buckets_data();
+    const array_bucket* end = buckets_end();
+    while (begin != end && begin->empty()) {
       ++begin;
     }
 
-    return (begin != m_buckets_data.cend())
-               ? const_iterator(begin, begin->cbegin(), this)
-               : cend();
+    return (begin != end) ? const_iterator(begin, begin->cbegin(), this)
+                          : cend();
   }
 
   iterator end() noexcept {
-    return iterator(m_buckets_data.end(), array_bucket::cend_it(), this);
+    return iterator(buckets_end(), array_bucket::cend_it(), this);
   }
 
   const_iterator end() const noexcept { return cend(); }
 
   const_iterator cend() const noexcept {
-    return const_iterator(m_buckets_data.end(), array_bucket::cend_it(), this);
+    return const_iterator(buckets_end(), array_bucket::cend_it(), this);
   }
 
   /*
@@ -1059,7 +1357,7 @@ class array_hash : private value_container<T>,
 
   void shrink_to_fit() {
     clear_old_erased_values();
-    value_container<T>::shrink_to_fit();
+    value_container_type::shrink_to_fit();
 
     rehash_impl(size_type(std::ceil(float(size()) / max_load_factor())));
   }
@@ -1068,10 +1366,11 @@ class array_hash : private value_container<T>,
    * Modifiers
    */
   void clear() noexcept {
-    value_container<T>::clear();
+    value_container_type::clear();
 
-    for (auto& bucket : m_buckets_data) {
-      bucket.clear();
+    array_bucket* buckets = buckets_data();
+    for (size_type ibucket = 0; ibucket < m_bucket_count; ibucket++) {
+      buckets[ibucket].clear(this->char_alloc());
     }
 
     m_nb_elements = 0;
@@ -1083,16 +1382,16 @@ class array_hash : private value_container<T>,
     const std::size_t hash = hash_key(key, key_size);
     std::size_t ibucket = bucket_for_hash(hash);
 
-    auto it_find = m_buckets[ibucket].find_or_end_of_bucket(key, key_size);
+    auto it_find =
+        lookup_buckets()[ibucket].find_or_end_of_bucket(key, key_size);
     if (it_find.second) {
       return std::make_pair(
-          iterator(m_buckets_data.begin() + ibucket, it_find.first, this),
-          false);
+          iterator(buckets_data() + ibucket, it_find.first, this), false);
     }
 
     if (grow_on_high_load()) {
       ibucket = bucket_for_hash(hash);
-      it_find = m_buckets[ibucket].find_or_end_of_bucket(key, key_size);
+      it_find = lookup_buckets()[ibucket].find_or_end_of_bucket(key, key_size);
     }
 
     return emplace_impl(ibucket, it_find.first, key, key_size,
@@ -1162,7 +1461,7 @@ class array_hash : private value_container<T>,
     }
 
     const std::size_t ibucket = bucket_for_hash(hash);
-    if (m_buckets[ibucket].erase(key, key_size)) {
+    if (lookup_buckets()[ibucket].erase(this->char_alloc(), key, key_size)) {
       m_nb_elements--;
       return 1;
     } else {
@@ -1170,15 +1469,31 @@ class array_hash : private value_container<T>,
     }
   }
 
+  /**
+   * As for the standard containers, if the allocators are not equal and don't
+   * propagate on swap, the behaviour is undefined. The allocators are swapped
+   * with the content.
+   */
   void swap(array_hash& other) {
+    tsl_ah_assert(char_alloc_traits::propagate_on_container_swap::value ||
+                  this->char_alloc() == other.char_alloc());
+
+    swap_with_allocator(other);
+  }
+
+  /**
+   * Exchange the contents and the allocators.
+   */
+  void swap_with_allocator(array_hash& other) {
     using std::swap;
 
-    swap(static_cast<value_container<T>&>(*this),
-         static_cast<value_container<T>&>(other));
+    value_container_type::swap_with_allocator(
+        static_cast<value_container_type&>(other));
     swap(static_cast<Hash&>(*this), static_cast<Hash&>(other));
     swap(static_cast<GrowthPolicy&>(*this), static_cast<GrowthPolicy&>(other));
-    swap(m_buckets_data, other.m_buckets_data);
+    swap(this->char_alloc(), other.char_alloc());
     swap(m_buckets, other.m_buckets);
+    swap(m_bucket_count, other.m_bucket_count);
     swap(m_nb_elements, other.m_nb_elements);
     swap(m_max_load_factor, other.m_max_load_factor);
     swap(m_load_threshold, other.m_load_threshold);
@@ -1211,7 +1526,8 @@ class array_hash : private value_container<T>,
   const U& at(const CharT* key, size_type key_size, std::size_t hash) const {
     const std::size_t ibucket = bucket_for_hash(hash);
 
-    auto it_find = m_buckets[ibucket].find_or_end_of_bucket(key, key_size);
+    auto it_find =
+        lookup_buckets()[ibucket].find_or_end_of_bucket(key, key_size);
     if (it_find.second) {
       return this->m_values[it_find.first.value()];
     } else {
@@ -1225,13 +1541,15 @@ class array_hash : private value_container<T>,
     const std::size_t hash = hash_key(key, key_size);
     std::size_t ibucket = bucket_for_hash(hash);
 
-    auto it_find = m_buckets[ibucket].find_or_end_of_bucket(key, key_size);
+    auto it_find =
+        lookup_buckets()[ibucket].find_or_end_of_bucket(key, key_size);
     if (it_find.second) {
       return this->m_values[it_find.first.value()];
     } else {
       if (grow_on_high_load()) {
         ibucket = bucket_for_hash(hash);
-        it_find = m_buckets[ibucket].find_or_end_of_bucket(key, key_size);
+        it_find =
+            lookup_buckets()[ibucket].find_or_end_of_bucket(key, key_size);
       }
 
       return emplace_impl(ibucket, it_find.first, key, key_size, U{})
@@ -1247,7 +1565,8 @@ class array_hash : private value_container<T>,
                   std::size_t hash) const {
     const std::size_t ibucket = bucket_for_hash(hash);
 
-    auto it_find = m_buckets[ibucket].find_or_end_of_bucket(key, key_size);
+    auto it_find =
+        lookup_buckets()[ibucket].find_or_end_of_bucket(key, key_size);
     if (it_find.second) {
       return 1;
     } else {
@@ -1266,9 +1585,10 @@ class array_hash : private value_container<T>,
   iterator find(const CharT* key, size_type key_size, std::size_t hash) {
     const std::size_t ibucket = bucket_for_hash(hash);
 
-    auto it_find = m_buckets[ibucket].find_or_end_of_bucket(key, key_size);
+    auto it_find =
+        lookup_buckets()[ibucket].find_or_end_of_bucket(key, key_size);
     if (it_find.second) {
-      return iterator(m_buckets_data.begin() + ibucket, it_find.first, this);
+      return iterator(buckets_data() + ibucket, it_find.first, this);
     } else {
       return end();
     }
@@ -1278,10 +1598,10 @@ class array_hash : private value_container<T>,
                       std::size_t hash) const {
     const std::size_t ibucket = bucket_for_hash(hash);
 
-    auto it_find = m_buckets[ibucket].find_or_end_of_bucket(key, key_size);
+    auto it_find =
+        lookup_buckets()[ibucket].find_or_end_of_bucket(key, key_size);
     if (it_find.second) {
-      return const_iterator(m_buckets_data.cbegin() + ibucket, it_find.first,
-                            this);
+      return const_iterator(buckets_data() + ibucket, it_find.first, this);
     } else {
       return cend();
     }
@@ -1313,11 +1633,12 @@ class array_hash : private value_container<T>,
   /*
    * Bucket interface
    */
-  size_type bucket_count() const { return m_buckets_data.size(); }
+  size_type bucket_count() const { return m_bucket_count; }
 
   size_type max_bucket_count() const {
+    const bucket_allocator alloc(this->char_alloc());
     return std::min(GrowthPolicy::max_bucket_count(),
-                    m_buckets_data.max_size());
+                    size_type(bucket_alloc_traits::max_size(alloc)));
   }
 
   /*
@@ -1354,6 +1675,10 @@ class array_hash : private value_container<T>,
    */
   hasher hash_function() const { return static_cast<const hasher&>(*this); }
 
+  allocator_type get_allocator() const {
+    return allocator_type(this->char_alloc());
+  }
+
   // TODO add support for statefull KeyEqual
   key_equal key_eq() const { return KeyEqual(); }
 
@@ -1361,9 +1686,8 @@ class array_hash : private value_container<T>,
    * Other
    */
   iterator mutable_iterator(const_iterator it) noexcept {
-    auto it_bucket =
-        m_buckets_data.begin() +
-        std::distance(m_buckets_data.cbegin(), it.m_buckets_iterator);
+    array_bucket* it_bucket =
+        buckets_data() + (it.m_buckets_iterator - buckets_data());
     return iterator(it_bucket, it.m_array_bucket_iterator, this);
   }
 
@@ -1392,9 +1716,9 @@ class array_hash : private value_container<T>,
    * the size of the map + the number of deleted values still stored is low
    * enough (see clear_old_erased_values).
    */
-  iterator erase_from_bucket(iterator pos) noexcept {
-    auto array_bucket_next_it =
-        pos.m_buckets_iterator->erase(pos.m_array_bucket_iterator);
+  iterator erase_from_bucket(iterator pos) {
+    auto array_bucket_next_it = pos.m_buckets_iterator->erase(
+        this->char_alloc(), pos.m_array_bucket_iterator);
     m_nb_elements--;
 
     if (array_bucket_next_it != pos.m_buckets_iterator->cend()) {
@@ -1402,10 +1726,10 @@ class array_hash : private value_container<T>,
     } else {
       do {
         ++pos.m_buckets_iterator;
-      } while (pos.m_buckets_iterator != m_buckets_data.end() &&
+      } while (pos.m_buckets_iterator != buckets_end() &&
                pos.m_buckets_iterator->empty());
 
-      if (pos.m_buckets_iterator != m_buckets_data.end()) {
+      if (pos.m_buckets_iterator != buckets_end()) {
         return iterator(pos.m_buckets_iterator,
                         pos.m_buckets_iterator->cbegin(), this);
       } else {
@@ -1448,7 +1772,7 @@ class array_hash : private value_container<T>,
       return;
     }
 
-    std::vector<T> new_values;
+    decltype(this->m_values) new_values(this->m_values.get_allocator());
     new_values.reserve(size());
 
     for (auto it = begin(); it != end(); ++it) {
@@ -1497,18 +1821,18 @@ class array_hash : private value_container<T>,
     if (this->m_values.size() == this->m_values.capacity()) {
       this->m_values.reserve(
           std::size_t(float(this->m_values.size()) *
-                      value_container<T>::VECTOR_GROWTH_RATE));
+                      value_container_type::VECTOR_GROWTH_RATE));
     }
 
     this->m_values.emplace_back(std::forward<ValueArgs>(value_args)...);
 
     try {
-      auto it = m_buckets[ibucket].append(
-          end_of_bucket, key, key_size, IndexSizeT(this->m_values.size() - 1));
+      auto it = buckets_data()[ibucket].append(
+          this->char_alloc(), end_of_bucket, key, key_size,
+          IndexSizeT(this->m_values.size() - 1));
       m_nb_elements++;
 
-      return std::make_pair(
-          iterator(m_buckets_data.begin() + ibucket, it, this), true);
+      return std::make_pair(iterator(buckets_data() + ibucket, it, this), true);
     } catch (...) {
       // Rollback
       this->m_values.pop_back();
@@ -1526,11 +1850,11 @@ class array_hash : private value_container<T>,
           "Can't insert value, too much values in the map.");
     }
 
-    auto it = m_buckets[ibucket].append(end_of_bucket, key, key_size);
+    auto it = buckets_data()[ibucket].append(this->char_alloc(), end_of_bucket,
+                                             key, key_size);
     m_nb_elements++;
 
-    return std::make_pair(iterator(m_buckets_data.begin() + ibucket, it, this),
-                          true);
+    return std::make_pair(iterator(buckets_data() + ibucket, it, this), true);
   }
 
   void rehash_impl(size_type bucket_count) {
@@ -1558,16 +1882,22 @@ class array_hash : private value_container<T>,
       ivalue++;
     }
 
-    std::vector<array_bucket> new_buckets;
-    new_buckets.reserve(bucket_count);
-    for (std::size_t ibucket = 0; ibucket < bucket_count; ibucket++) {
-      new_buckets.emplace_back(required_size_for_bucket[ibucket]);
+    bucket_pointer new_buckets = allocate_bucket_array(bucket_count);
+    array_bucket* new_buckets_raw = to_raw_pointer(new_buckets);
+    try {
+      for (std::size_t ibucket = 0; ibucket < bucket_count; ibucket++) {
+        new_buckets_raw[ibucket] =
+            array_bucket(this->char_alloc(), required_size_for_bucket[ibucket]);
+      }
+    } catch (...) {
+      release_bucket_array(new_buckets, bucket_count);
+      throw;
     }
 
     ivalue = 0;
     for (auto it = begin(); it != end(); ++it) {
       const std::size_t ibucket = bucket_for_ivalue[ivalue];
-      append_iterator_in_reserved_bucket_no_check(new_buckets[ibucket], it);
+      append_iterator_in_reserved_bucket_no_check(new_buckets_raw[ibucket], it);
 
       ivalue++;
     }
@@ -1575,9 +1905,12 @@ class array_hash : private value_container<T>,
     using std::swap;
     swap(static_cast<GrowthPolicy&>(*this), new_growth_policy);
 
-    m_buckets_data.swap(new_buckets);
-    m_buckets = !m_buckets_data.empty() ? m_buckets_data.data()
-                                        : static_empty_bucket_ptr();
+    swap(m_buckets, new_buckets);
+    const size_type old_bucket_count = m_bucket_count;
+    m_bucket_count = bucket_count;
+
+    // new_buckets now holds the old buckets
+    release_bucket_array(new_buckets, old_bucket_count);
 
     // Call max_load_factor to change m_load_threshold
     max_load_factor(m_max_load_factor);
@@ -1619,7 +1952,7 @@ class array_hash : private value_container<T>,
     const slz_size_type version = SERIALIZATION_PROTOCOL_VERSION;
     serializer(version);
 
-    const slz_size_type bucket_count = m_buckets_data.size();
+    const slz_size_type bucket_count = m_bucket_count;
     serializer(bucket_count);
 
     const slz_size_type nb_elements = m_nb_elements;
@@ -1628,9 +1961,10 @@ class array_hash : private value_container<T>,
     const float max_load_factor = m_max_load_factor;
     serializer(max_load_factor);
 
-    for (const array_bucket& bucket : m_buckets_data) {
-      bucket.serialize(serializer);
-      serialize_bucket_values(serializer, bucket);
+    const array_bucket* buckets = buckets_data();
+    for (size_type ibucket = 0; ibucket < m_bucket_count; ibucket++) {
+      buckets[ibucket].serialize(serializer);
+      serialize_bucket_values(serializer, buckets[ibucket]);
     }
   }
 
@@ -1651,7 +1985,7 @@ class array_hash : private value_container<T>,
 
   template <class Deserializer>
   void deserialize_impl(Deserializer& deserializer, bool hash_compatible) {
-    tsl_ah_assert(m_buckets_data.empty());  // Current hash table must be empty
+    tsl_ah_assert(m_bucket_count == 0);  // Current hash table must be empty
 
     const slz_size_type version =
         deserialize_value<slz_size_type>(deserializer);
@@ -1674,35 +2008,46 @@ class array_hash : private value_container<T>,
 
     size_type bucket_count = numeric_cast<size_type>(
         bucket_count_ds, "Deserialized bucket_count is too big.");
-    GrowthPolicy::operator=(GrowthPolicy(bucket_count));
+    GrowthPolicy new_growth_policy(bucket_count);
+
+    if (hash_compatible && bucket_count != bucket_count_ds) {
+      throw std::runtime_error(
+          "The GrowthPolicy is not the same even though hash_compatible is "
+          "true.");
+    }
+
+    // The buckets have to be in place before the growth policy changes.
+    if (bucket_count > max_bucket_count()) {
+      throw std::length_error("The map exceeds its maximum bucket count.");
+    }
+    m_buckets = allocate_bucket_array(bucket_count);
+    m_bucket_count = bucket_count;
+    GrowthPolicy::operator=(new_growth_policy);
 
     this->max_load_factor(max_load_factor);
-    value_container<T>::reserve(m_nb_elements);
+    value_container_type::reserve(m_nb_elements);
 
+    array_bucket* buckets = buckets_data();
     if (hash_compatible) {
-      if (bucket_count != bucket_count_ds) {
-        throw std::runtime_error(
-            "The GrowthPolicy is not the same even though hash_compatible is "
-            "true.");
-      }
-
-      m_buckets_data.reserve(bucket_count);
       for (size_type i = 0; i < bucket_count; i++) {
-        m_buckets_data.push_back(array_bucket::deserialize(deserializer));
-        deserialize_bucket_values(deserializer, m_buckets_data.back());
+        buckets[i] =
+            array_bucket::deserialize(this->char_alloc(), deserializer);
+        deserialize_bucket_values(deserializer, buckets[i]);
       }
     } else {
-      m_buckets_data.resize(bucket_count);
       for (size_type i = 0; i < bucket_count; i++) {
         // TODO use buffer to avoid reallocation on each deserialization.
-        array_bucket bucket = array_bucket::deserialize(deserializer);
-        deserialize_bucket_values(deserializer, bucket);
+        bucket_guard guard(this->char_alloc());
+        guard.bucket =
+            array_bucket::deserialize(this->char_alloc(), deserializer);
+        deserialize_bucket_values(deserializer, guard.bucket);
 
-        for (auto it_val = bucket.cbegin(); it_val != bucket.cend(); ++it_val) {
+        for (auto it_val = guard.bucket.cbegin(); it_val != guard.bucket.cend();
+             ++it_val) {
           const std::size_t ibucket =
               bucket_for_hash(hash_key(it_val.key(), it_val.key_size()));
 
-          auto it_find = m_buckets_data[ibucket].find_or_end_of_bucket(
+          auto it_find = buckets[ibucket].find_or_end_of_bucket(
               it_val.key(), it_val.key_size());
           if (it_find.second) {
             throw std::runtime_error(
@@ -1710,13 +2055,11 @@ class array_hash : private value_container<T>,
                 "times.");
           }
 
-          append_array_bucket_iterator_in_bucket(m_buckets_data[ibucket],
+          append_array_bucket_iterator_in_bucket(buckets[ibucket],
                                                  it_find.first, it_val);
         }
       }
     }
-
-    m_buckets = m_buckets_data.data();
 
     if (load_factor() > this->max_load_factor()) {
       throw std::runtime_error(
@@ -1750,7 +2093,8 @@ class array_hash : private value_container<T>,
   void append_array_bucket_iterator_in_bucket(
       array_bucket& bucket, typename array_bucket::const_iterator end_of_bucket,
       typename array_bucket::const_iterator it_val) {
-    bucket.append(end_of_bucket, it_val.key(), it_val.key_size());
+    bucket.append(this->char_alloc(), end_of_bucket, it_val.key(),
+                  it_val.key_size());
   }
 
   template <class U = T,
@@ -1758,8 +2102,8 @@ class array_hash : private value_container<T>,
   void append_array_bucket_iterator_in_bucket(
       array_bucket& bucket, typename array_bucket::const_iterator end_of_bucket,
       typename array_bucket::const_iterator it_val) {
-    bucket.append(end_of_bucket, it_val.key(), it_val.key_size(),
-                  it_val.value());
+    bucket.append(this->char_alloc(), end_of_bucket, it_val.key(),
+                  it_val.key_size(), it_val.value());
   }
 
  public:
@@ -1778,25 +2122,166 @@ class array_hash : private value_container<T>,
   static constexpr float REHASH_CLEAR_OLD_ERASED_VALUE_THRESHOLD = 0.9f;
 
   /**
-   * Return an always valid pointer to a static empty array_bucket.
+   * Move all the elements of other (whose allocator is not equal to ours, so
+   * we can't take its memory) in this empty hash, then empty other. The bucket
+   * count is the one of other so there is no rehash.
    */
-  array_bucket* static_empty_bucket_ptr() {
+  void move_elements_from(array_hash& other) {
+    tsl_ah_assert(m_bucket_count == 0);
+
+    m_buckets = allocate_bucket_array(other.m_bucket_count);
+    m_bucket_count = other.m_bucket_count;
+    this->max_load_factor(other.m_max_load_factor);
+    value_container_type::reserve(other.size());
+
+    for (auto it = other.begin(); it != other.end(); ++it) {
+      move_emplace(it);
+    }
+
+    other.clear();
+  }
+
+  template <class U = T,
+            typename std::enable_if<has_mapped_type<U>::value>::type* = nullptr>
+  void move_emplace(iterator& it) {
+    emplace(it.key(), it.key_size(), std::move(it.value()));
+  }
+
+  template <class U = T, typename std::enable_if<
+                             !has_mapped_type<U>::value>::type* = nullptr>
+  void move_emplace(iterator& it) {
+    emplace(it.key(), it.key_size());
+  }
+
+  /**
+   * Return an always valid pointer to a static empty array_bucket (only used
+   * to avoid a branch on the lookups when there is no bucket, never stored).
+   */
+  static array_bucket* static_empty_bucket_ptr() {
     static array_bucket empty_bucket;
     return &empty_bucket;
   }
 
- private:
-  std::vector<array_bucket> m_buckets_data;
+  /**
+   * Owns a bucket that must be released with the allocator on scope exit.
+   */
+  struct bucket_guard {
+    explicit bucket_guard(char_allocator& alloc_) : bucket(), alloc(alloc_) {}
+    ~bucket_guard() { bucket.clear(alloc); }
+
+    bucket_guard(const bucket_guard&) = delete;
+    bucket_guard& operator=(const bucket_guard&) = delete;
+
+    array_bucket bucket;
+    char_allocator& alloc;
+  };
+
+  array_bucket* buckets_data() noexcept { return to_raw_pointer(m_buckets); }
+
+  const array_bucket* buckets_data() const noexcept {
+    return to_raw_pointer(m_buckets);
+  }
+
+  array_bucket* buckets_end() noexcept {
+    return buckets_data() + m_bucket_count;
+  }
+
+  const array_bucket* buckets_end() const noexcept {
+    return buckets_data() + m_bucket_count;
+  }
 
   /**
-   * Points to m_buckets_data.data() if !m_buckets_data.empty() otherwise points
-   * to static_empty_bucket_ptr. This variable is useful to avoid the cost of
-   * checking if m_buckets_data is empty when trying to find an element.
-   *
-   * TODO Remove m_buckets_data and only use a pointer+size instead of a
-   * pointer+vector to save some space in the array_hash object.
+   * Buckets to use to search a key: the static empty bucket if there is no
+   * bucket (the growth policy returns 0 in this case).
    */
-  array_bucket* m_buckets;
+  array_bucket* lookup_buckets() noexcept {
+    if (TSL_AH_LIKELY(m_bucket_count != 0)) {
+      return buckets_data();
+    }
+
+    return static_empty_bucket_ptr();
+  }
+
+  const array_bucket* lookup_buckets() const noexcept {
+    if (TSL_AH_LIKELY(m_bucket_count != 0)) {
+      return buckets_data();
+    }
+
+    return static_empty_bucket_ptr();
+  }
+
+  /**
+   * Array of 'count' empty buckets (null if count is 0).
+   */
+  bucket_pointer allocate_bucket_array(size_type count) {
+    if (count == 0) {
+      return bucket_pointer();
+    }
+
+    bucket_allocator alloc(this->char_alloc());
+    bucket_pointer buckets = bucket_alloc_traits::allocate(alloc, count);
+
+    array_bucket* raw_buckets = to_raw_pointer(buckets);
+    for (size_type ibucket = 0; ibucket < count; ibucket++) {
+      ::new (static_cast<void*>(raw_buckets + ibucket)) array_bucket();
+    }
+
+    return buckets;
+  }
+
+  /**
+   * Release the buffers of the buckets and the array.
+   */
+  void release_bucket_array(bucket_pointer buckets, size_type count) noexcept {
+    if (count == 0) {
+      return;
+    }
+
+    array_bucket* raw_buckets = to_raw_pointer(buckets);
+    for (size_type ibucket = 0; ibucket < count; ibucket++) {
+      raw_buckets[ibucket].clear(this->char_alloc());
+      raw_buckets[ibucket].~array_bucket();
+    }
+
+    bucket_allocator alloc(this->char_alloc());
+    bucket_alloc_traits::deallocate(alloc, buckets, count);
+  }
+
+  /**
+   * Copy of the buckets of other, allocated with our allocator.
+   */
+  bucket_pointer copy_bucket_array(const array_hash& other) {
+    bucket_pointer buckets = allocate_bucket_array(other.m_bucket_count);
+
+    array_bucket* raw_buckets = to_raw_pointer(buckets);
+    const array_bucket* other_buckets = other.buckets_data();
+    try {
+      for (size_type ibucket = 0; ibucket < other.m_bucket_count; ibucket++) {
+        raw_buckets[ibucket] = other_buckets[ibucket].clone(this->char_alloc());
+      }
+    } catch (...) {
+      release_bucket_array(buckets, other.m_bucket_count);
+      throw;
+    }
+
+    return buckets;
+  }
+
+  char_allocator& char_alloc() noexcept {
+    return allocator_storage_type::char_alloc();
+  }
+
+  const char_allocator& char_alloc() const noexcept {
+    return allocator_storage_type::char_alloc();
+  }
+
+ private:
+  /**
+   * Array of m_bucket_count buckets, null if there is none. Fancy pointer, no
+   * raw pointer to the buckets is stored.
+   */
+  bucket_pointer m_buckets;
+  size_type m_bucket_count;
 
   IndexSizeT m_nb_elements;
   float m_max_load_factor;

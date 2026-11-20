@@ -366,7 +366,7 @@ inline bool TSpellCorrector::StartsWithTitleCase(context_t::iterator nxt
     , context_t::iterator const & e
 ) const noexcept
 {
-    if((nxt -> orig_word.concat.left == nxt -> token.str().size())) 
+    if(nxt -> orig_word.concat.left == nxt -> token.str().size()) 
     {
         // just punct
         return nxt -> orig_word.concat.left == 1u;

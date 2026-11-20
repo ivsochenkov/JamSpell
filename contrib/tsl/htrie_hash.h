@@ -25,7 +25,7 @@
 #define TSL_HTRIE_HASH_H
 
 #include <algorithm>
-#include <array>
+#include <cassert>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -41,6 +41,7 @@
 
 #include "array-hash/array_map.h"
 #include "array-hash/array_set.h"
+#include "htrie_children_policies.h"
 
 /*
  * __has_include is a bit useless
@@ -103,6 +104,187 @@ static T numeric_cast(U value,
   return ret;
 }
 
+using tsl::htrie_policy::detail::to_raw_pointer;
+
+/**
+ * Number of letters before the first null letter (strlen for any CharT).
+ */
+template <class CharT>
+inline std::size_t key_length(const CharT* key) noexcept {
+  std::size_t length = 0;
+  while (key[length] != CharT()) {
+    ++length;
+  }
+
+  return length;
+}
+
+inline std::size_t key_length(const char* key) noexcept {
+  return std::strlen(key);
+}
+
+template <class...>
+struct make_void {
+  using type = void;
+};
+
+/**
+ * True if C exposes a contiguous sequence of CharT through data() and size()
+ * (std::basic_string, std::basic_string_view, std::vector<CharT>,
+ * std::array<CharT, N>, ...).
+ */
+template <class C, class CharT, class = void>
+struct is_key_container : std::false_type {};
+
+template <class C, class CharT>
+struct is_key_container<
+    C, CharT,
+    typename make_void<decltype(std::declval<const C&>().data()),
+                       decltype(std::declval<const C&>().size())>::type>
+    : std::integral_constant<
+          bool,
+          std::is_convertible<decltype(std::declval<const C&>().data()),
+                              const CharT*>::value &&
+              std::is_convertible<decltype(std::declval<const C&>().size()),
+                                  std::size_t>::value> {};
+
+/**
+ * Non-owning view on a key (a sequence of letters). It is what the key taking
+ * methods of htrie_map/htrie_set accept, so that a key can be given as
+ *  - a null-terminated array `const CharT*` (string literals, ...),
+ *  - any contiguous container with data() and size(): std::basic_string,
+ *    std::basic_string_view, std::vector<CharT>, std::array<CharT, N>, ...
+ * The view must not outlive the sequence it refers to.
+ */
+template <class CharT>
+class basic_key_view {
+ public:
+  basic_key_view() noexcept : m_data(empty_data()), m_size(0) {}
+
+  basic_key_view(const CharT* data, std::size_t size) noexcept
+      : m_data(data != nullptr ? data : empty_data()), m_size(size) {}
+
+  basic_key_view(const CharT* null_terminated_key) noexcept
+      : m_data(null_terminated_key), m_size(key_length(null_terminated_key)) {}
+
+  template <class Container,
+            typename std::enable_if<
+                is_key_container<Container, CharT>::value &&
+                !std::is_same<typename std::remove_cv<Container>::type,
+                              basic_key_view>::value>::type* = nullptr>
+  basic_key_view(const Container& container) noexcept
+      : basic_key_view(container.data(),
+                       static_cast<std::size_t>(container.size())) {}
+
+  const CharT* data() const noexcept { return m_data; }
+  std::size_t size() const noexcept { return m_size; }
+
+ private:
+  // data() of an empty std::vector may be null, never hand a null key
+  // to the array hash.
+  static const CharT* empty_data() noexcept {
+    static const CharT empty_key = CharT();
+    return &empty_key;
+  }
+
+ private:
+  const CharT* m_data;
+  std::size_t m_size;
+};
+
+template <class CharT>
+struct is_standard_char_type
+    : std::integral_constant<bool, std::is_same<CharT, char>::value ||
+                                       std::is_same<CharT, wchar_t>::value ||
+                                       std::is_same<CharT, char16_t>::value ||
+                                       std::is_same<CharT, char32_t>::value
+#ifdef __cpp_char8_t
+                                       || std::is_same<CharT, char8_t>::value
+#endif
+                             > {
+};
+
+/**
+ * FNV-1a over the bytes of each letter. Used as default hash for the letter
+ * types that tsl::ah::str_hash can't handle from C++17 on (it relies on
+ * std::hash<std::basic_string_view<CharT>> which only exists for the standard
+ * character types). Hashing the bytes, not the whole letter, keeps the low
+ * bits (used to select a bucket) sensitive to every bit of a wide letter.
+ */
+template <class CharT>
+struct fnv1a_hash {
+  std::size_t operator()(const CharT* key,
+                         std::size_t key_size) const noexcept {
+    static const std::size_t init = std::size_t(
+        (sizeof(std::size_t) == 8) ? 0xcbf29ce484222325ull : 0x811c9dc5ull);
+    static const std::size_t multiplier = std::size_t(
+        (sizeof(std::size_t) == 8) ? 0x100000001b3ull : 0x1000193ull);
+
+    typedef typename std::make_unsigned<CharT>::type unsigned_letter;
+
+    std::size_t hash = init;
+    for (std::size_t i = 0; i < key_size; ++i) {
+      const unsigned_letter letter = static_cast<unsigned_letter>(key[i]);
+      for (std::size_t ibyte = 0; ibyte < sizeof(CharT); ++ibyte) {
+        hash ^= static_cast<std::size_t>((letter >> (8 * ibyte)) & 0xffu);
+        hash *= multiplier;
+      }
+    }
+
+    return hash;
+  }
+};
+
+/**
+ * Default hash of a key: tsl::ah::str_hash for the standard character types
+ * (so nothing changes for char, wchar_t, ...), fnv1a_hash for any other
+ * integral letter type (std::uint16_t, unsigned int, ...).
+ */
+template <class CharT>
+using default_hash =
+    typename std::conditional<is_standard_char_type<CharT>::value,
+                              tsl::ah::str_hash<CharT>,
+                              fnv1a_hash<CharT>>::type;
+
+/**
+ * Type used to build/return keys (iterator::key()) for a given letter type.
+ * std::basic_string for the letter types that have a standard char_traits, a
+ * std::vector for any other integral type (std::uint32_t, std::uint16_t, ...).
+ * Both are used the same way by the trie (clear, push_back, insert(end, ...),
+ * data, size, iterators).
+ */
+template <class CharT>
+struct key_buffer {
+  using type = std::vector<CharT>;
+};
+
+template <>
+struct key_buffer<char> {
+  using type = std::basic_string<char>;
+};
+
+template <>
+struct key_buffer<wchar_t> {
+  using type = std::basic_string<wchar_t>;
+};
+
+template <>
+struct key_buffer<char16_t> {
+  using type = std::basic_string<char16_t>;
+};
+
+template <>
+struct key_buffer<char32_t> {
+  using type = std::basic_string<char32_t>;
+};
+
+#ifdef __cpp_char8_t
+template <>
+struct key_buffer<char8_t> {
+  using type = std::basic_string<char8_t>;
+};
+#endif
+
 template <class T>
 struct value_node {
   /*
@@ -121,34 +303,87 @@ struct value_node {
 template <>
 struct value_node<void> {};
 
-template <class CharT, bool HasPrefix>
+template <class KeyBuffer, bool HasPrefix>
 struct prefix_filter {};
 
-template <class CharT>
-struct prefix_filter<CharT, true> {
+template <class KeyBuffer>
+struct prefix_filter<KeyBuffer, true> {
   prefix_filter() = default;
-  prefix_filter(std::basic_string<CharT> prefix_filter)
-      : m_prefix_filter(std::move(prefix_filter)) {}
+  prefix_filter(KeyBuffer prefix) : m_prefix_filter(std::move(prefix)) {}
 
-  std::basic_string<CharT> m_prefix_filter;
+  KeyBuffer m_prefix_filter;
 };
 
 /**
  * T should be void if there is no value associated to a key (in a set for
  * example).
+ *
+ * CharT is the "letter" type of the keys: any integral type but bool (char,
+ * wchar_t, char16_t, char32_t, std::uint16_t, unsigned int, ...). A key is a
+ * sequence of letters (pointer + size). Its size is limited by KeySizeT (see
+ * array_hash).
+ *
+ * ChildrenPolicy chooses how a trie_node stores its children (see
+ * htrie_children_policies.h for the policy concept and ready to use policies).
+ *
+ * Allocator is the allocator all the memory of the tree is allocated with
+ * (nodes, children containers, buckets and values of the hash nodes). It is
+ * rebound to every type that is allocated. It can be stateful and can use fancy
+ * pointers: every pointer stored in the tree is an
+ * std::allocator_traits<...>::pointer and every node keeps a copy of the
+ * allocator it was allocated with, so with an allocator of a shared memory
+ * segment (boost::interprocess::allocator, ...) the whole tree lives in the
+ * segment and the segment can be mapped at any address. Requirements:
+ *  - the allocator and the Hash must be usable in shared memory too (no
+ *    pointer to the process memory),
+ *  - the values of a map must not refer to the process memory either. A value
+ *    that needs an allocator (a boost::interprocess::string, ...) has to be
+ *    built by the caller with the right one: values are never constructed with
+ *    the allocator (operator[] and default constructed values can't be used
+ *    for them),
+ *  - ChildrenPolicy must work with fancy pointers (dense_array_children,
+ *    flat_map_children and bitmap_children do, std_map_children doesn't).
+ * The iterators are plain C++ objects holding raw pointers, they must not be
+ * placed in shared memory.
+ *
+ * The allocator propagation follows the standard containers
+ * (propagate_on_container_copy_assignment, ..._move_assignment, ..._swap,
+ * select_on_container_copy_construction).
  */
-template <class CharT, class T, class Hash, class KeySizeT>
-class htrie_hash {
+template <class CharT, class T, class Hash, class KeySizeT,
+          class ChildrenPolicy =
+              tsl::htrie_policy::default_children_policy<CharT>,
+          class Allocator = std::allocator<char>>
+class htrie_hash
+    : private tsl::htrie_policy::detail::allocator_holder<Allocator> {
  private:
+  /**
+   * The allocator is stored as an (empty) base class: no space for stateless
+   * allocators, and no reference to a padding byte of an empty member (that
+   * GCC reports as uninitialized).
+   */
+  using allocator_base = tsl::htrie_policy::detail::allocator_holder<Allocator>;
+
+  Allocator& allocator_ref() noexcept { return this->stored_allocator(); }
+  const Allocator& allocator_ref() const noexcept {
+    return this->stored_allocator();
+  }
+
   template <typename U>
   using has_value =
       typename std::integral_constant<bool, !std::is_same<U, void>::value>;
 
-  static_assert(std::is_same<CharT, char>::value,
-                "char is the only supported CharT type for now.");
+  static_assert(
+      std::is_integral<CharT>::value &&
+          !std::is_same<typename std::remove_cv<CharT>::type, bool>::value,
+      "CharT must be an integral type (but bool).");
 
-  static const std::size_t ALPHABET_SIZE =
-      std::numeric_limits<typename std::make_unsigned<CharT>::type>::max() + 1;
+  using alloc_traits = std::allocator_traits<Allocator>;
+
+  /**
+   * Stateless allocators are always equal.
+   */
+  using is_always_equal = std::is_empty<Allocator>;
 
  public:
   template <bool IsConst, bool IsPrefixIterator>
@@ -158,6 +393,9 @@ class htrie_hash {
   using key_size_type = KeySizeT;
   using size_type = std::size_t;
   using hasher = Hash;
+  using allocator_type = Allocator;
+  using children_policy = ChildrenPolicy;
+  using key_buffer_type = typename key_buffer<CharT>::type;
   using iterator = htrie_hash_iterator<false, false>;
   using const_iterator = htrie_hash_iterator<true, false>;
   using prefix_iterator = htrie_hash_iterator<false, true>;
@@ -169,10 +407,10 @@ class htrie_hash {
       has_value<T>::value,
       tsl::array_map<CharT, T, Hash, tsl::ah::str_equal<CharT>, false, KeySizeT,
                      ArrayHashIndexSizeT,
-                     tsl::ah::power_of_two_growth_policy<4>>,
+                     tsl::ah::power_of_two_growth_policy<4>, Allocator>,
       tsl::array_set<CharT, Hash, tsl::ah::str_equal<CharT>, false, KeySizeT,
                      ArrayHashIndexSizeT,
-                     tsl::ah::power_of_two_growth_policy<4>>>::type;
+                     tsl::ah::power_of_two_growth_policy<4>, Allocator>>::type;
 
  private:
   /*
@@ -195,6 +433,16 @@ class htrie_hash {
    *
    * A trie node should at least have one child or a value node. There can't be
    * a trie node without any child and no value node.
+   *
+   * The children of a trie_node are stored by the container chosen by
+   * ChildrenPolicy, which maps a letter to an owning node_handle.
+   *
+   * Memory: nodes are allocated with Allocator rebound to the node type and are
+   * owned through node_ptr (a unique_ptr like handle holding an
+   * allocator_traits<...>::pointer). A node knows the allocator it was
+   * allocated with (get_allocator()), which is how a node_ptr can free it
+   * without having to store an allocator. Raw pointers are only used
+   * transiently (iterators, traversal), never stored in a node.
    */
 
   using value_node = tsl::detail_htrie_hash::value_node<T>;
@@ -202,18 +450,21 @@ class htrie_hash {
   class trie_node;
   class hash_node;
 
+  template <class U>
+  using node_allocator_type = typename alloc_traits::template rebind_alloc<U>;
+
+  /**
+   * (Fancy) pointer to a U as returned by the allocator.
+   */
+  template <class U>
+  using node_pointer =
+      typename std::allocator_traits<node_allocator_type<U>>::pointer;
+
   // TODO better encapsulate operations modifying the tree.
   class anode {
     friend class trie_node;
 
    public:
-    /*
-     * TODO Avoid the virtual to economize 8 bytes. We could use a custom
-     * deleter in the std::unique_ptr<anode> we use (as we know if an anode is a
-     * trie_node or hash_node).
-     */
-    virtual ~anode() = default;
-
     bool is_trie_node() const noexcept {
       return m_node_type == node_type::TRIE_NODE;
     }
@@ -253,20 +504,29 @@ class htrie_hash {
     /**
      * Return nullptr if none.
      */
-    trie_node* parent() noexcept { return m_parent_node; }
+    trie_node* parent() noexcept { return to_raw_pointer(m_parent_node); }
 
-    const trie_node* parent() const noexcept { return m_parent_node; }
+    const trie_node* parent() const noexcept {
+      return to_raw_pointer(m_parent_node);
+    }
 
    protected:
     enum class node_type : unsigned char { HASH_NODE, TRIE_NODE };
 
     anode(node_type node_type_)
-        : m_node_type(node_type_), m_child_of_char(0), m_parent_node(nullptr) {}
+        : m_node_type(node_type_), m_child_of_char(0), m_parent_node() {}
 
     anode(node_type node_type_, CharT child_of_char)
         : m_node_type(node_type_),
           m_child_of_char(child_of_char),
-          m_parent_node(nullptr) {}
+          m_parent_node() {}
+
+    /*
+     * Not virtual (saves a vtable pointer per node, which would also be a
+     * pointer to the process memory): nodes are always destroyed through
+     * destroy_node which dispatches on m_node_type.
+     */
+    ~anode() = default;
 
    protected:
     node_type m_node_type;
@@ -288,92 +548,255 @@ class htrie_hash {
      * trie_node_1 has no parent, its m_child_of_char is undefined.
      */
     CharT m_child_of_char;
-    trie_node* m_parent_node;
+    node_pointer<trie_node> m_parent_node;
   };
 
-  // Give the position in trie_node::m_children corresponding to the character c
-  static std::size_t as_position(CharT c) noexcept {
-    return static_cast<std::size_t>(
-        static_cast<typename std::make_unsigned<CharT>::type>(c));
+  /**
+   * Owner of a node of type U (anode, trie_node or hash_node), unique_ptr like.
+   * The node is destroyed and deallocated with the allocator it carries.
+   *
+   * The handle holds a fancy pointer, never copy it bitwise.
+   */
+  template <class U>
+  class node_ptr {
+    template <class V>
+    friend class node_ptr;
+
+   public:
+    using element_type = U;
+    using pointer = node_pointer<U>;
+
+    node_ptr() noexcept : m_ptr() {}
+    node_ptr(std::nullptr_t) noexcept : m_ptr() {}
+    explicit node_ptr(pointer ptr) noexcept : m_ptr(ptr) {}
+
+    node_ptr(const node_ptr&) = delete;
+    node_ptr& operator=(const node_ptr&) = delete;
+
+    node_ptr(node_ptr&& other) noexcept : m_ptr(other.release()) {}
+
+    template <class V, typename std::enable_if<
+                           std::is_convertible<V*, U*>::value &&
+                           !std::is_same<V, U>::value>::type* = nullptr>
+    node_ptr(node_ptr<V>&& other) noexcept : m_ptr(to_base(other.release())) {}
+
+    ~node_ptr() { reset(); }
+
+    node_ptr& operator=(node_ptr&& other) noexcept {
+      if (this != &other) {
+        reset(other.release());
+      }
+
+      return *this;
+    }
+
+    template <class V, typename std::enable_if<
+                           std::is_convertible<V*, U*>::value &&
+                           !std::is_same<V, U>::value>::type* = nullptr>
+    node_ptr& operator=(node_ptr<V>&& other) noexcept {
+      reset(to_base(other.release()));
+      return *this;
+    }
+
+    node_ptr& operator=(std::nullptr_t) noexcept {
+      reset();
+      return *this;
+    }
+
+    U* get() const noexcept { return to_raw_pointer(m_ptr); }
+    U* operator->() const noexcept { return get(); }
+    U& operator*() const noexcept { return *get(); }
+    explicit operator bool() const noexcept { return static_cast<bool>(m_ptr); }
+
+    /**
+     * Give up the ownership, return the (fancy) pointer.
+     */
+    pointer release() noexcept {
+      pointer ptr = m_ptr;
+      m_ptr = pointer();
+
+      return ptr;
+    }
+
+    void reset() noexcept { reset(pointer()); }
+    void reset(std::nullptr_t) noexcept { reset(pointer()); }
+
+    void reset(pointer ptr) noexcept {
+      pointer old_ptr = m_ptr;
+      m_ptr = ptr;
+
+      if (old_ptr) {
+        destroy_node(*to_raw_pointer(old_ptr));
+      }
+    }
+
+    friend bool operator==(const node_ptr& lhs, std::nullptr_t) noexcept {
+      return !lhs;
+    }
+
+    friend bool operator==(std::nullptr_t, const node_ptr& rhs) noexcept {
+      return !rhs;
+    }
+
+    friend bool operator!=(const node_ptr& lhs, std::nullptr_t) noexcept {
+      return static_cast<bool>(lhs);
+    }
+
+    friend bool operator!=(std::nullptr_t, const node_ptr& rhs) noexcept {
+      return static_cast<bool>(rhs);
+    }
+
+   private:
+    /**
+     * Convert a pointer to a derived node to a pointer to the base node.
+     */
+    template <class DerivedPointer>
+    static pointer to_base(const DerivedPointer& ptr) noexcept {
+      if (!ptr) {
+        return pointer();
+      }
+
+      U& base = *ptr;
+      return std::pointer_traits<pointer>::pointer_to(base);
+    }
+
+    pointer m_ptr;
+  };
+
+  using node_handle = node_ptr<anode>;
+
+  /**
+   * Allocate a node of type N with a copy of alloc and construct it with
+   * N(alloc, args...). N stores alloc (or a copy) which is what is used to
+   * deallocate it.
+   */
+  template <class N, class... Args>
+  static node_ptr<N> make_node(const Allocator& alloc, Args&&... args) {
+    using node_alloc = node_allocator_type<N>;
+    using traits = std::allocator_traits<node_alloc>;
+
+    node_alloc node_allocator(alloc);
+    node_pointer<N> ptr = traits::allocate(node_allocator, 1);
+    try {
+      traits::construct(node_allocator, to_raw_pointer(ptr), alloc,
+                        std::forward<Args>(args)...);
+    } catch (...) {
+      traits::deallocate(node_allocator, ptr, 1);
+      throw;
+    }
+
+    return node_ptr<N>(ptr);
+  }
+
+  /**
+   * Destroy the node and give its memory back to the allocator it carries.
+   */
+  template <class N>
+  static void deallocate_node(N& node) noexcept {
+    using node_alloc = node_allocator_type<N>;
+    using traits = std::allocator_traits<node_alloc>;
+
+    // Copy the allocator before the node (which holds it) is destroyed.
+    node_alloc node_allocator(node.get_allocator());
+    node_pointer<N> ptr =
+        std::pointer_traits<node_pointer<N>>::pointer_to(node);
+
+    traits::destroy(node_allocator, std::addressof(node));
+    traits::deallocate(node_allocator, ptr, 1);
+  }
+
+  static void destroy_node(trie_node& node) noexcept { deallocate_node(node); }
+
+  static void destroy_node(hash_node& node) noexcept { deallocate_node(node); }
+
+  static void destroy_node(anode& node) noexcept {
+    if (node.is_trie_node()) {
+      deallocate_node(node.as_trie_node());
+    } else {
+      deallocate_node(node.as_hash_node());
+    }
   }
 
   class trie_node : public anode {
    public:
-    trie_node()
+    using children_type =
+        typename ChildrenPolicy::template children<CharT, node_handle,
+                                                   Allocator>;
+
+    explicit trie_node(const Allocator& alloc)
         : anode(anode::node_type::TRIE_NODE),
-          m_value_node(nullptr),
-          m_children() {}
+          m_value_node(),
+          m_children(alloc) {}
 
-    trie_node(const trie_node& other)
+    /**
+     * Deep copy of other, allocated with alloc.
+     */
+    trie_node(const Allocator& alloc, const trie_node& other)
         : anode(anode::node_type::TRIE_NODE, other.m_child_of_char),
-          m_value_node(nullptr),
-          m_children() {
-      if (other.m_value_node != nullptr) {
-        m_value_node = make_unique<value_node>(*other.m_value_node);
-      }
-
-      // TODO avoid recursion
-      for (std::size_t ichild = 0; ichild < other.m_children.size(); ichild++) {
-        if (other.m_children[ichild] != nullptr) {
-          if (other.m_children[ichild]->is_hash_node()) {
-            m_children[ichild] = make_unique<hash_node>(
-                other.m_children[ichild]->as_hash_node());
-          } else {
-            m_children[ichild] = make_unique<trie_node>(
-                other.m_children[ichild]->as_trie_node());
-          }
-
-          m_children[ichild]->m_parent_node = this;
+          m_value_node(),
+          m_children(alloc) {
+      try {
+        if (other.has_value()) {
+          emplace_value(other.value_ref());
         }
+
+        m_children.reserve(other.m_children.size());
+
+        // TODO avoid recursion
+        other.m_children.for_each(
+            [this, &alloc](CharT c, const anode& other_child) {
+              if (other_child.is_hash_node()) {
+                set_child(
+                    c, make_node<hash_node>(alloc, other_child.as_hash_node()));
+              } else {
+                set_child(
+                    c, make_node<trie_node>(alloc, other_child.as_trie_node()));
+              }
+            });
+      } catch (...) {
+        // The destructor is not called if the constructor throws.
+        reset_value();
+        throw;
       }
     }
 
+    ~trie_node() { reset_value(); }
+
+    trie_node(const trie_node& other) = delete;
     trie_node(trie_node&& other) = delete;
     trie_node& operator=(const trie_node& other) = delete;
     trie_node& operator=(trie_node&& other) = delete;
 
     /**
+     * The allocator the node (and its value node) has been allocated with.
+     */
+    Allocator get_allocator() const noexcept {
+      return m_children.get_allocator();
+    }
+
+    /**
      * Return nullptr if none.
      */
-    anode* first_child() noexcept {
-      return const_cast<anode*>(
-          static_cast<const trie_node*>(this)->first_child());
-    }
+    anode* first_child() noexcept { return m_children.first(); }
 
-    const anode* first_child() const noexcept {
-      for (std::size_t ichild = 0; ichild < m_children.size(); ichild++) {
-        if (m_children[ichild] != nullptr) {
-          return m_children[ichild].get();
-        }
-      }
-
-      return nullptr;
-    }
+    const anode* first_child() const noexcept { return m_children.first(); }
 
     /**
      * Get the next_child that come after current_child. Return nullptr if no
      * next child.
      */
     anode* next_child(const anode& current_child) noexcept {
-      return const_cast<anode*>(
-          static_cast<const trie_node*>(this)->next_child(current_child));
+      tsl_ht_assert(current_child.parent() == this);
+      return m_children.next(current_child.child_of_char());
     }
 
     const anode* next_child(const anode& current_child) const noexcept {
       tsl_ht_assert(current_child.parent() == this);
-
-      for (std::size_t ichild = as_position(current_child.child_of_char()) + 1;
-           ichild < m_children.size(); ichild++) {
-        if (m_children[ichild] != nullptr) {
-          return m_children[ichild].get();
-        }
-      }
-
-      return nullptr;
+      return m_children.next(current_child.child_of_char());
     }
 
     /**
-     * Return the first left-descendant trie node with an m_value_node. If none
+     * Return the first left-descendant trie node with a value node. If none
      * return the most left trie node.
      */
     trie_node& most_left_descendant_value_trie_node() noexcept {
@@ -385,7 +808,7 @@ class htrie_hash {
     const trie_node& most_left_descendant_value_trie_node() const noexcept {
       const trie_node* current_node = this;
       while (true) {
-        if (current_node->m_value_node != nullptr) {
+        if (current_node->has_value()) {
           return *current_node;
         }
 
@@ -401,92 +824,148 @@ class htrie_hash {
       }
     }
 
-    size_type nb_children() const noexcept {
-      return std::count_if(
-          m_children.cbegin(), m_children.cend(),
-          [](const std::unique_ptr<anode>& n) { return n != nullptr; });
+    size_type nb_children() const noexcept { return m_children.size(); }
+
+    bool empty() const noexcept { return m_children.empty() && !has_value(); }
+
+    /**
+     * Return nullptr if there is no child for the letter.
+     */
+    anode* child(CharT for_char) noexcept { return m_children.find(for_char); }
+
+    const anode* child(CharT for_char) const noexcept {
+      return m_children.find(for_char);
     }
 
-    bool empty() const noexcept {
-      return std::all_of(m_children.cbegin(), m_children.cend(),
-                         [](const std::unique_ptr<anode>& n) {
-                           return n == nullptr;
-                         }) &&
-             m_value_node == nullptr;
+    /**
+     * Hint to avoid reallocations when about to add nb_children children.
+     */
+    void reserve_children(size_type nb_children) {
+      m_children.reserve(nb_children);
     }
 
-    std::unique_ptr<anode>& child(CharT for_char) noexcept {
-      return m_children[as_position(for_char)];
+    /**
+     * Take the ownership of child (non-null) as child for the letter,
+     * replacing (and destroying) the previous one if any.
+     */
+    void set_child(CharT for_char, node_handle child) {
+      tsl_ht_assert(child != nullptr);
+
+      child->m_child_of_char = for_char;
+      child->m_parent_node =
+          std::pointer_traits<node_pointer<trie_node>>::pointer_to(*this);
+
+      m_children.set(for_char, std::move(child));
     }
 
-    const std::unique_ptr<anode>& child(CharT for_char) const noexcept {
-      return m_children[as_position(for_char)];
+    /**
+     * Detach the child of the letter without destroying it, the ownership is
+     * given to the caller (null handle if no child).
+     */
+    node_handle release_child(CharT for_char) noexcept {
+      return m_children.release(for_char);
     }
 
-    typename std::array<std::unique_ptr<anode>, ALPHABET_SIZE>::iterator
-    begin() noexcept {
-      return m_children.begin();
+    /**
+     * Destroy the child of the letter, if any.
+     */
+    void erase_child(CharT for_char) noexcept { m_children.erase(for_char); }
+
+    /**
+     * Value node: marks the end of a key, holds its value.
+     */
+    bool has_value() const noexcept { return static_cast<bool>(m_value_node); }
+
+    value_node& value_ref() noexcept {
+      tsl_ht_assert(has_value());
+      return *m_value_node;
     }
 
-    typename std::array<std::unique_ptr<anode>, ALPHABET_SIZE>::iterator
-    end() noexcept {
-      return m_children.end();
+    const value_node& value_ref() const noexcept {
+      tsl_ht_assert(has_value());
+      return *m_value_node;
     }
 
-    void set_child(CharT for_char, std::unique_ptr<anode> child) noexcept {
-      if (child != nullptr) {
-        child->m_child_of_char = for_char;
-        child->m_parent_node = this;
+    /**
+     * Create the value node (the node must not have one yet).
+     */
+    template <class... Args>
+    void emplace_value(Args&&... args) {
+      tsl_ht_assert(!has_value());
+
+      value_allocator alloc(get_allocator());
+      value_pointer ptr = value_traits::allocate(alloc, 1);
+      try {
+        value_traits::construct(alloc, to_raw_pointer(ptr),
+                                std::forward<Args>(args)...);
+      } catch (...) {
+        value_traits::deallocate(alloc, ptr, 1);
+        throw;
       }
 
-      m_children[as_position(for_char)] = std::move(child);
+      m_value_node = ptr;
     }
 
-    std::unique_ptr<value_node>& val_node() noexcept { return m_value_node; }
+    void reset_value() noexcept {
+      if (m_value_node) {
+        value_allocator alloc(get_allocator());
+        value_pointer ptr = m_value_node;
+        m_value_node = value_pointer();
 
-    const std::unique_ptr<value_node>& val_node() const noexcept {
-      return m_value_node;
+        value_traits::destroy(alloc, to_raw_pointer(ptr));
+        value_traits::deallocate(alloc, ptr, 1);
+      }
     }
 
    private:
+    using value_allocator = node_allocator_type<value_node>;
+    using value_traits = std::allocator_traits<value_allocator>;
+    using value_pointer = typename value_traits::pointer;
+
     // TODO Avoid storing a value_node when has_value<T>::value is false
-    std::unique_ptr<value_node> m_value_node;
+    value_pointer m_value_node;
 
     /**
-     * Each character CharT corresponds to one position in the array. To convert
-     * a character to a position use the as_position method.
-     *
-     * TODO Try to reduce the size of m_children with a hash map, linear/binary
-     * search on array, ...
-     * TODO Store number of non-null values in m_children. Check if we can store
-     * this value in the alignment space as we don't want the node to get bigger
-     * (empty() and nb_children() are rarely used so it is not an important
-     * variable).
+     * Letter -> child, container chosen by ChildrenPolicy.
      */
-    std::array<std::unique_ptr<anode>, ALPHABET_SIZE> m_children;
+    children_type m_children;
   };
 
   class hash_node : public anode {
    public:
-    hash_node(const Hash& hash, float max_load_factor)
-        : hash_node(HASH_NODE_DEFAULT_INIT_BUCKETS_COUNT, hash,
+    hash_node(const Allocator& alloc, const Hash& hash, float max_load_factor)
+        : hash_node(alloc, HASH_NODE_DEFAULT_INIT_BUCKETS_COUNT, hash,
                     max_load_factor) {}
 
-    hash_node(size_type bucket_count, const Hash& hash, float max_load_factor)
-        : anode(anode::node_type::HASH_NODE), m_array_hash(bucket_count, hash) {
+    hash_node(const Allocator& alloc, size_type bucket_count, const Hash& hash,
+              float max_load_factor)
+        : anode(anode::node_type::HASH_NODE),
+          m_array_hash(bucket_count, hash, alloc) {
       m_array_hash.max_load_factor(max_load_factor);
     }
 
-    hash_node(array_hash_type&& array_hash) noexcept(
-        std::is_nothrow_move_constructible<array_hash_type>::value)
+    hash_node(const Allocator& alloc, array_hash_type&& array_hash)
         : anode(anode::node_type::HASH_NODE),
-          m_array_hash(std::move(array_hash)) {}
+          m_array_hash(std::move(array_hash), alloc) {}
 
-    hash_node(const hash_node& other) = default;
+    /**
+     * Copy of other, allocated with alloc.
+     */
+    hash_node(const Allocator& alloc, const hash_node& other)
+        : anode(anode::node_type::HASH_NODE, other.m_child_of_char),
+          m_array_hash(other.m_array_hash, alloc) {}
 
+    hash_node(const hash_node& other) = delete;
     hash_node(hash_node&& other) = delete;
     hash_node& operator=(const hash_node& other) = delete;
     hash_node& operator=(hash_node&& other) = delete;
+
+    /**
+     * The allocator the node has been allocated with.
+     */
+    Allocator get_allocator() const noexcept {
+      return m_array_hash.get_allocator();
+    }
 
     array_hash_type& array_hash() noexcept { return m_array_hash; }
 
@@ -498,7 +977,8 @@ class htrie_hash {
 
  public:
   template <bool IsConst, bool IsPrefixIterator>
-  class htrie_hash_iterator : private prefix_filter<CharT, IsPrefixIterator> {
+  class htrie_hash_iterator
+      : private prefix_filter<key_buffer_type, IsPrefixIterator> {
     friend class htrie_hash;
 
    private:
@@ -552,13 +1032,13 @@ class htrie_hash {
 
     /**
      * Start reading from the value in start_trie_node.
-     * start_trie_node->val_node() should be non-null.
+     * start_trie_node->has_value() should be true.
      */
     htrie_hash_iterator(trie_node_type& start_trie_node) noexcept
         : m_current_trie_node(&start_trie_node),
           m_current_hash_node(nullptr),
           m_read_trie_node_value(true) {
-      tsl_ht_assert(m_current_trie_node->val_node() != nullptr);
+      tsl_ht_assert(m_current_trie_node->has_value());
     }
 
     template <bool TIsPrefixIterator = IsPrefixIterator,
@@ -578,8 +1058,9 @@ class htrie_hash {
     htrie_hash_iterator(trie_node_type* tnode, hash_node_type* hnode,
                         array_hash_iterator_type begin,
                         array_hash_iterator_type end, bool read_trie_node_value,
-                        std::basic_string<CharT> prefix_filter_) noexcept
-        : prefix_filter<CharT, TIsPrefixIterator>(std::move(prefix_filter_)),
+                        key_buffer_type prefix_filter_) noexcept
+        : prefix_filter<key_buffer_type, TIsPrefixIterator>(
+              std::move(prefix_filter_)),
           m_current_trie_node(tnode),
           m_current_hash_node(hnode),
           m_array_hash_iterator(begin),
@@ -608,7 +1089,8 @@ class htrie_hash {
         typename std::enable_if<TIsConst && TIsPrefixIterator>::type* = nullptr>
     htrie_hash_iterator(
         const htrie_hash_iterator<!TIsConst, TIsPrefixIterator>& other) noexcept
-        : prefix_filter<CharT, TIsPrefixIterator>(other.m_prefix_filter),
+        : prefix_filter<key_buffer_type, TIsPrefixIterator>(
+              other.m_prefix_filter),
           m_current_trie_node(other.m_current_trie_node),
           m_current_hash_node(other.m_current_hash_node),
           m_array_hash_iterator(other.m_array_hash_iterator),
@@ -620,7 +1102,7 @@ class htrie_hash {
     htrie_hash_iterator& operator=(const htrie_hash_iterator& other) = default;
     htrie_hash_iterator& operator=(htrie_hash_iterator&& other) = default;
 
-    void key(std::basic_string<CharT>& key_buffer_out) const {
+    void key(key_buffer_type& key_buffer_out) const {
       key_buffer_out.clear();
 
       trie_node_type* tnode = m_current_trie_node;
@@ -637,13 +1119,14 @@ class htrie_hash {
           key_buffer_out.push_back(m_current_hash_node->child_of_char());
         }
 
-        key_buffer_out.append(m_array_hash_iterator.key(),
-                              m_array_hash_iterator.key_size());
+        const CharT* hash_key = m_array_hash_iterator.key();
+        key_buffer_out.insert(key_buffer_out.end(), hash_key,
+                              hash_key + m_array_hash_iterator.key_size());
       }
     }
 
-    std::basic_string<CharT> key() const {
-      std::basic_string<CharT> key_buffer;
+    key_buffer_type key() const {
+      key_buffer_type key_buffer;
       key(key_buffer);
 
       return key_buffer;
@@ -654,9 +1137,9 @@ class htrie_hash {
     reference value() const {
       if (this->m_read_trie_node_value) {
         tsl_ht_assert(this->m_current_trie_node != nullptr);
-        tsl_ht_assert(this->m_current_trie_node->val_node() != nullptr);
+        tsl_ht_assert(this->m_current_trie_node->has_value());
 
-        return this->m_current_trie_node->val_node()->m_value;
+        return this->m_current_trie_node->value_ref().m_value;
       } else {
         return this->m_array_hash_iterator.value();
       }
@@ -740,7 +1223,7 @@ class htrie_hash {
     }
 
    private:
-    void hash_node_prefix(std::basic_string<CharT>& key_buffer_out) const {
+    void hash_node_prefix(key_buffer_type& key_buffer_out) const {
       tsl_ht_assert(!m_read_trie_node_value);
       key_buffer_out.clear();
 
@@ -772,10 +1255,7 @@ class htrie_hash {
         return;
       }
 
-      while ((this->m_prefix_filter.size() > m_array_hash_iterator.key_size() ||
-              this->m_prefix_filter.compare(
-                  0, this->m_prefix_filter.size(), m_array_hash_iterator.key(),
-                  this->m_prefix_filter.size()) != 0)) {
+      while (!current_hash_key_has_prefix()) {
         ++m_array_hash_iterator;
         if (m_array_hash_iterator == m_array_hash_end_iterator) {
           if (m_current_trie_node == nullptr) {
@@ -788,6 +1268,17 @@ class htrie_hash {
           return;
         }
       }
+    }
+
+    template <bool TIsPrefixIterator = IsPrefixIterator,
+              typename std::enable_if<TIsPrefixIterator>::type* = nullptr>
+    bool current_hash_key_has_prefix() const {
+      const std::size_t prefix_size = this->m_prefix_filter.size();
+
+      return prefix_size <= std::size_t(m_array_hash_iterator.key_size()) &&
+             std::equal(this->m_prefix_filter.begin(),
+                        this->m_prefix_filter.end(),
+                        m_array_hash_iterator.key());
     }
 
     /**
@@ -821,7 +1312,7 @@ class htrie_hash {
       } else {
         m_current_trie_node =
             &search_start.as_trie_node().most_left_descendant_value_trie_node();
-        if (m_current_trie_node->val_node() != nullptr) {
+        if (m_current_trie_node->has_value()) {
           m_read_trie_node_value = true;
         } else {
           anode_type* first_child = m_current_trie_node->first_child();
@@ -868,32 +1359,46 @@ class htrie_hash {
   };
 
  public:
-  htrie_hash(const Hash& hash, float max_load_factor, size_type burst_threshold)
-      : m_root(nullptr),
+  htrie_hash(const Hash& hash, float max_load_factor, size_type burst_threshold,
+             const Allocator& alloc = Allocator())
+      : allocator_base(alloc),
+        m_root(),
         m_nb_elements(0),
         m_hash(hash),
-        m_max_load_factor(max_load_factor) {
+        m_max_load_factor(max_load_factor),
+        m_burst_threshold(0) {
     this->burst_threshold(burst_threshold);
   }
 
   htrie_hash(const htrie_hash& other)
-      : m_root(nullptr),
+      : htrie_hash(other, alloc_traits::select_on_container_copy_construction(
+                              other.allocator_ref())) {}
+
+  /**
+   * Copy of other whose memory is allocated with alloc.
+   */
+  htrie_hash(const htrie_hash& other, const Allocator& alloc)
+      : allocator_base(alloc),
+        m_root(),
         m_nb_elements(other.m_nb_elements),
         m_hash(other.m_hash),
         m_max_load_factor(other.m_max_load_factor),
         m_burst_threshold(other.m_burst_threshold) {
     if (other.m_root != nullptr) {
       if (other.m_root->is_hash_node()) {
-        m_root = make_unique<hash_node>(other.m_root->as_hash_node());
+        m_root =
+            make_node<hash_node>(allocator_ref(), other.m_root->as_hash_node());
       } else {
-        m_root = make_unique<trie_node>(other.m_root->as_trie_node());
+        m_root =
+            make_node<trie_node>(allocator_ref(), other.m_root->as_trie_node());
       }
     }
   }
 
   htrie_hash(htrie_hash&& other) noexcept(
       std::is_nothrow_move_constructible<Hash>::value)
-      : m_root(std::move(other.m_root)),
+      : allocator_base(std::move(other.allocator_ref())),
+        m_root(std::move(other.m_root)),
         m_nb_elements(other.m_nb_elements),
         m_hash(std::move(other.m_hash)),
         m_max_load_factor(other.m_max_load_factor),
@@ -901,30 +1406,47 @@ class htrie_hash {
     other.clear();
   }
 
+  /**
+   * Take the content of other if the allocators are equal, otherwise move the
+   * elements one by one in the memory of alloc.
+   */
+  htrie_hash(htrie_hash&& other, const Allocator& alloc)
+      : allocator_base(alloc),
+        m_root(),
+        m_nb_elements(0),
+        m_hash(std::move(other.m_hash)),
+        m_max_load_factor(other.m_max_load_factor),
+        m_burst_threshold(other.m_burst_threshold) {
+    if (is_always_equal::value || allocator_ref() == other.allocator_ref()) {
+      m_root = std::move(other.m_root);
+      m_nb_elements = other.m_nb_elements;
+    } else {
+      move_elements_from(other);
+    }
+
+    other.clear();
+  }
+
   htrie_hash& operator=(const htrie_hash& other) {
     if (&other != this) {
-      std::unique_ptr<anode> new_root = nullptr;
-      if (other.m_root != nullptr) {
-        if (other.m_root->is_hash_node()) {
-          new_root = make_unique<hash_node>(other.m_root->as_hash_node());
-        } else {
-          new_root = make_unique<trie_node>(other.m_root->as_trie_node());
-        }
-      }
-
-      m_hash = other.m_hash;
-      m_root = std::move(new_root);
-      m_nb_elements = other.m_nb_elements;
-      m_max_load_factor = other.m_max_load_factor;
-      m_burst_threshold = other.m_burst_threshold;
+      // The nodes of the new tree are allocated by the allocator we will have
+      // at the end. If building it fails, nothing changes.
+      htrie_hash tmp(other,
+                     alloc_traits::propagate_on_container_copy_assignment::value
+                         ? other.allocator_ref()
+                         : allocator_ref());
+      swap_content(tmp);
     }
 
     return *this;
   }
 
   htrie_hash& operator=(htrie_hash&& other) {
-    other.swap(*this);
-    other.clear();
+    if (&other != this) {
+      move_assign(
+          other,
+          typename alloc_traits::propagate_on_container_move_assignment());
+    }
 
     return *this;
   }
@@ -1013,7 +1535,7 @@ class htrie_hash {
     }
 
     if (m_root == nullptr) {
-      m_root = make_unique<hash_node>(m_hash, m_max_load_factor);
+      m_root = make_node<hash_node>(allocator_ref(), m_hash, m_max_load_factor);
     }
 
     return insert_impl(*m_root, key, key_size,
@@ -1053,10 +1575,11 @@ class htrie_hash {
       if (current_node->is_trie_node()) {
         trie_node* tnode = &current_node->as_trie_node();
 
-        if (tnode->child(prefix[iprefix]) == nullptr) {
+        anode* next_node = tnode->child(prefix[iprefix]);
+        if (next_node == nullptr) {
           return 0;
         } else {
-          current_node = tnode->child(prefix[iprefix]).get();
+          current_node = next_node;
         }
       } else {
         hash_node& hnode = current_node->as_hash_node();
@@ -1072,7 +1595,7 @@ class htrie_hash {
         const size_type nb_erased =
             size_descendants(current_node->as_trie_node());
 
-        parent->set_child(current_node->child_of_char(), nullptr);
+        parent->erase_child(current_node->child_of_char());
         m_nb_elements -= nb_erased;
 
         if (parent->empty()) {
@@ -1100,14 +1623,16 @@ class htrie_hash {
     }
   }
 
+  /**
+   * As for the standard containers, the behaviour is undefined if the
+   * allocators are not equal and don't propagate on swap.
+   */
   void swap(htrie_hash& other) {
-    using std::swap;
+    tsl_ht_assert(alloc_traits::propagate_on_container_swap::value ||
+                  is_always_equal::value ||
+                  allocator_ref() == other.allocator_ref());
 
-    swap(m_hash, other.m_hash);
-    swap(m_root, other.m_root);
-    swap(m_nb_elements, other.m_nb_elements);
-    swap(m_max_load_factor, other.m_max_load_factor);
-    swap(m_burst_threshold, other.m_burst_threshold);
+    swap_content(other);
   }
 
   /*
@@ -1259,6 +1784,8 @@ class htrie_hash {
    */
   hasher hash_function() const { return m_hash; }
 
+  allocator_type get_allocator() const { return allocator_ref(); }
+
   /*
    * Other
    */
@@ -1274,6 +1801,75 @@ class htrie_hash {
 
  private:
   /**
+   * Exchange everything (content and allocator). The nodes keep the allocator
+   * they have been allocated with, they can change of owner whatever the
+   * allocators are.
+   */
+  void swap_content(htrie_hash& other) {
+    using std::swap;
+
+    swap(m_hash, other.m_hash);
+    swap(m_root, other.m_root);
+    swap(m_nb_elements, other.m_nb_elements);
+    swap(m_max_load_factor, other.m_max_load_factor);
+    swap(m_burst_threshold, other.m_burst_threshold);
+    swap(allocator_ref(), other.allocator_ref());
+  }
+
+  /**
+   * The allocator propagates on move assignment: take everything.
+   */
+  void move_assign(htrie_hash& other, std::true_type) {
+    clear();
+    swap_content(other);
+    other.clear();
+  }
+
+  void move_assign(htrie_hash& other, std::false_type) {
+    if (is_always_equal::value || allocator_ref() == other.allocator_ref()) {
+      // The allocators are equal: swapping them (and the content) is enough.
+      clear();
+      swap_content(other);
+      other.clear();
+    } else {
+      clear();
+
+      using std::swap;
+      swap(m_hash, other.m_hash);
+      m_max_load_factor = other.m_max_load_factor;
+      m_burst_threshold = other.m_burst_threshold;
+
+      move_elements_from(other);
+      other.clear();
+    }
+  }
+
+  /**
+   * Insert, one by one, all the elements of other (whose allocator is not equal
+   * to ours so its nodes can't be taken) by moving their values.
+   */
+  void move_elements_from(htrie_hash& other) {
+    key_buffer_type key_buffer;
+
+    for (auto it = other.begin(); it != other.end(); ++it) {
+      it.key(key_buffer);
+      insert_moved(key_buffer, it);
+    }
+  }
+
+  template <class U = T,
+            typename std::enable_if<has_value<U>::value>::type* = nullptr>
+  void insert_moved(const key_buffer_type& key, iterator& it) {
+    insert(key.data(), key.size(), std::move(it.value()));
+  }
+
+  template <class U = T,
+            typename std::enable_if<!has_value<U>::value>::type* = nullptr>
+  void insert_moved(const key_buffer_type& key, iterator& /*it*/) {
+    insert(key.data(), key.size());
+  }
+
+  /**
    * Get the begin iterator by searching for the most left descendant node
    * starting at search_start_node.
    */
@@ -1285,7 +1881,7 @@ class htrie_hash {
 
     const trie_node& tnode =
         search_start_node.as_trie_node().most_left_descendant_value_trie_node();
-    if (tnode.val_node() != nullptr) {
+    if (tnode.has_value()) {
       return Iterator(tnode);
     } else {
       const anode* first_child = tnode.first_child();
@@ -1369,20 +1965,21 @@ class htrie_hash {
       if (current_node->is_trie_node()) {
         trie_node& tnode = current_node->as_trie_node();
 
-        if (tnode.child(key[ikey]) != nullptr) {
-          current_node = tnode.child(key[ikey]).get();
+        anode* next_node = tnode.child(key[ikey]);
+        if (next_node != nullptr) {
+          current_node = next_node;
         } else {
-          auto hnode = make_unique<hash_node>(m_hash, m_max_load_factor);
+          auto hnode =
+              make_node<hash_node>(allocator_ref(), m_hash, m_max_load_factor);
           auto insert_it = hnode->array_hash().emplace_ks(
               key + ikey + 1, key_size - ikey - 1,
               std::forward<ValueArgs>(value_args)...);
 
+          hash_node& hnode_ref = *hnode;
           tnode.set_child(key[ikey], std::move(hnode));
           m_nb_elements++;
 
-          return std::make_pair(
-              iterator(tnode.child(key[ikey])->as_hash_node(), insert_it.first),
-              true);
+          return std::make_pair(iterator(hnode_ref, insert_it.first), true);
         }
       } else {
         return insert_in_hash_node(current_node->as_hash_node(), key + ikey,
@@ -1393,17 +1990,17 @@ class htrie_hash {
 
     if (current_node->is_trie_node()) {
       trie_node& tnode = current_node->as_trie_node();
-      if (tnode.val_node() != nullptr) {
+      if (tnode.has_value()) {
         return std::make_pair(iterator(tnode), false);
       } else {
-        tnode.val_node() =
-            make_unique<value_node>(std::forward<ValueArgs>(value_args)...);
+        tnode.emplace_value(std::forward<ValueArgs>(value_args)...);
         m_nb_elements++;
 
         return std::make_pair(iterator(tnode), true);
       }
     } else {
-      return insert_in_hash_node(current_node->as_hash_node(), "", 0,
+      const CharT empty_key = CharT();
+      return insert_in_hash_node(current_node->as_hash_node(), &empty_key, 0,
                                  std::forward<ValueArgs>(value_args)...);
     }
   }
@@ -1414,7 +2011,7 @@ class htrie_hash {
                                                 size_type key_size,
                                                 ValueArgs&&... value_args) {
     if (need_burst(hnode)) {
-      std::unique_ptr<trie_node> new_node = burst(hnode);
+      node_ptr<trie_node> new_node = burst(hnode);
       if (hnode.parent() == nullptr) {
         tsl_ht_assert(m_root.get() == &hnode);
 
@@ -1446,9 +2043,9 @@ class htrie_hash {
 
     if (pos.m_read_trie_node_value) {
       tsl_ht_assert(pos.m_current_trie_node != nullptr &&
-                    pos.m_current_trie_node->val_node() != nullptr);
+                    pos.m_current_trie_node->has_value());
 
-      pos.m_current_trie_node->val_node().reset(nullptr);
+      pos.m_current_trie_node->reset_value();
       m_nb_elements--;
 
       if (pos.m_current_trie_node->empty()) {
@@ -1492,8 +2089,8 @@ class htrie_hash {
       tsl_ht_assert(m_root.get() == &empty_node);
       tsl_ht_assert(m_nb_elements == 0);
       m_root.reset(nullptr);
-    } else if (parent->val_node() != nullptr || parent->nb_children() > 1) {
-      parent->child(empty_node.child_of_char()).reset(nullptr);
+    } else if (parent->has_value() || parent->nb_children() > 1) {
+      parent->erase_child(empty_node.child_of_char());
     } else if (parent->parent() == nullptr) {
       tsl_ht_assert(m_root.get() == empty_node.parent());
       tsl_ht_assert(m_nb_elements == 0);
@@ -1504,14 +2101,19 @@ class htrie_hash {
        * Put empty_node as new child of the grand parent instead of parent (move
        * hnode up, and delete the parent). And recurse.
        *
-       * We can't just set grand_parent->child(parent->child_of_char()) to
-       * nullptr as the grand_parent may also become empty. We don't want empty
-       * trie_node with no value_node in the tree.
+       * We can't just erase grand_parent->child(parent->child_of_char()) as the
+       * grand_parent may also become empty. We don't want empty trie_node with
+       * no value_node in the tree.
+       *
+       * set_child() replaces (and so destroys) the parent: it must not throw
+       * when replacing an existing child (container requirement) and the
+       * parent letter has to be read before.
        */
       trie_node* grand_parent = parent->parent();
-      grand_parent->set_child(
-          parent->child_of_char(),
-          std::move(parent->child(empty_node.child_of_char())));
+      const CharT parent_char = parent->child_of_char();
+
+      node_handle moved_up = parent->release_child(empty_node.child_of_char());
+      grand_parent->set_child(parent_char, std::move(moved_up));
 
       clear_empty_nodes(empty_node);
     }
@@ -1531,10 +2133,11 @@ class htrie_hash {
       if (current_node->is_trie_node()) {
         const trie_node* tnode = &current_node->as_trie_node();
 
-        if (tnode->child(key[ikey]) == nullptr) {
+        const anode* next_node = tnode->child(key[ikey]);
+        if (next_node == nullptr) {
           return cend();
         } else {
-          current_node = tnode->child(key[ikey]).get();
+          current_node = next_node;
         }
       } else {
         return find_in_hash_node(current_node->as_hash_node(), key + ikey,
@@ -1544,9 +2147,10 @@ class htrie_hash {
 
     if (current_node->is_trie_node()) {
       const trie_node& tnode = current_node->as_trie_node();
-      return (tnode.val_node() != nullptr) ? const_iterator(tnode) : cend();
+      return tnode.has_value() ? const_iterator(tnode) : cend();
     } else {
-      return find_in_hash_node(current_node->as_hash_node(), "", 0);
+      const CharT empty_key = CharT();
+      return find_in_hash_node(current_node->as_hash_node(), &empty_key, 0);
     }
   }
 
@@ -1577,14 +2181,15 @@ class htrie_hash {
       if (current_node->is_trie_node()) {
         const trie_node& tnode = current_node->as_trie_node();
 
-        if (tnode.val_node() != nullptr) {
+        if (tnode.has_value()) {
           longest_found_prefix = const_iterator(tnode);
         }
 
-        if (tnode.child(value[ivalue]) == nullptr) {
+        const anode* next_node = tnode.child(value[ivalue]);
+        if (next_node == nullptr) {
           return longest_found_prefix;
         } else {
-          current_node = tnode.child(value[ivalue]).get();
+          current_node = next_node;
         }
       } else {
         const hash_node& hnode = current_node->as_hash_node();
@@ -1609,13 +2214,14 @@ class htrie_hash {
     if (current_node->is_trie_node()) {
       const trie_node& tnode = current_node->as_trie_node();
 
-      if (tnode.val_node() != nullptr) {
+      if (tnode.has_value()) {
         longest_found_prefix = const_iterator(tnode);
       }
     } else {
       const hash_node& hnode = current_node->as_hash_node();
 
-      auto it = hnode.array_hash().find_ks("", 0);
+      const CharT empty_key = CharT();
+      auto it = hnode.array_hash().find_ks(&empty_key, 0);
       if (it != hnode.array_hash().end()) {
         longest_found_prefix = const_iterator(hnode, it);
       }
@@ -1633,14 +2239,15 @@ class htrie_hash {
       if (current_node->is_trie_node()) {
         auto& tnode = current_node->as_trie_node();
 
-        if (tnode.val_node() != nullptr) {
+        if (tnode.has_value()) {
           visitor(Iterator(tnode));
         }
 
-        if (tnode.child(value[ivalue]) == nullptr) {
+        auto* next_node = tnode.child(value[ivalue]);
+        if (next_node == nullptr) {
           return;
         } else {
-          current_node = tnode.child(value[ivalue]).get();
+          current_node = next_node;
         }
       } else {
         auto& hnode = current_node->as_hash_node();
@@ -1665,13 +2272,14 @@ class htrie_hash {
     if (current_node->is_trie_node()) {
       auto& tnode = current_node->as_trie_node();
 
-      if (tnode.val_node() != nullptr) {
+      if (tnode.has_value()) {
         visitor(Iterator(tnode));
       }
     } else {
       auto& hnode = current_node->as_hash_node();
 
-      auto it = hnode.array_hash().find_ks("", 0);
+      const CharT empty_key = CharT();
+      auto it = hnode.array_hash().find_ks(&empty_key, 0);
       if (it != hnode.array_hash().end()) {
         visitor(Iterator(hnode, it));
       }
@@ -1695,17 +2303,18 @@ class htrie_hash {
       if (current_node->is_trie_node()) {
         const trie_node* tnode = &current_node->as_trie_node();
 
-        if (tnode->child(prefix[iprefix]) == nullptr) {
+        const anode* next_node = tnode->child(prefix[iprefix]);
+        if (next_node == nullptr) {
           return std::make_pair(prefix_cend(), prefix_cend());
         } else {
-          current_node = tnode->child(prefix[iprefix]).get();
+          current_node = next_node;
         }
       } else {
         const hash_node& hnode = current_node->as_hash_node();
         const_prefix_iterator begin(
             hnode.parent(), &hnode, hnode.array_hash().begin(),
             hnode.array_hash().end(), false,
-            std::basic_string<CharT>(prefix + iprefix, prefix_size - iprefix));
+            key_buffer_type(prefix + iprefix, prefix + prefix_size));
         begin.filter_prefix();
 
         const_prefix_iterator end = cend<const_prefix_iterator>(*current_node);
@@ -1751,6 +2360,74 @@ class htrie_hash {
   }
 
   /**
+   * State of a burst in progress: the first letters found in the bursted
+   * array hash (sorted, unique) and the hash node created for each of them
+   * (same order). The alphabet can be huge (32 bits letters) so we can't use a
+   * table indexed by letter, binary search is used instead.
+   */
+  struct burst_plan {
+    std::vector<CharT> first_chars;
+    std::vector<hash_node*> hash_nodes;
+  };
+
+  /**
+   * Create in new_node one hash_node per distinct first letter of the keys in
+   * array_hash, sized for the number of keys that will be moved into it.
+   * Nodes are added in ascending letter order which is the cheapest insertion
+   * order for every children container.
+   */
+  burst_plan prepare_burst(const array_hash_type& array_hash,
+                           trie_node& new_node) {
+    std::vector<CharT> chars;
+    chars.reserve(array_hash.size());
+    for (auto it = array_hash.cbegin(); it != array_hash.cend(); ++it) {
+      if (it.key_size() > 0) {
+        chars.push_back(it.key()[0]);
+      }
+    }
+
+    std::sort(chars.begin(), chars.end(),
+              tsl::htrie_policy::detail::unsigned_less<CharT>());
+
+    burst_plan plan;
+    std::vector<size_type> counts;
+    for (std::size_t i = 0; i < chars.size();) {
+      std::size_t j = i + 1;
+      while (j < chars.size() && chars[j] == chars[i]) {
+        ++j;
+      }
+
+      plan.first_chars.push_back(chars[i]);
+      counts.push_back(j - i);
+      i = j;
+    }
+
+    new_node.reserve_children(plan.first_chars.size());
+    plan.hash_nodes.reserve(plan.first_chars.size());
+    for (std::size_t i = 0; i < plan.first_chars.size(); i++) {
+      const size_type nb_buckets = size_type(std::ceil(
+          float(counts[i] + HASH_NODE_DEFAULT_INIT_BUCKETS_COUNT / 2) /
+          m_max_load_factor));
+
+      node_ptr<hash_node> hnode = make_node<hash_node>(
+          allocator_ref(), nb_buckets, m_hash, m_max_load_factor);
+      plan.hash_nodes.push_back(hnode.get());
+      new_node.set_child(plan.first_chars[i], std::move(hnode));
+    }
+
+    return plan;
+  }
+
+  static hash_node& burst_target(const burst_plan& plan, CharT first_char) {
+    auto it = std::lower_bound(
+        plan.first_chars.begin(), plan.first_chars.end(), first_char,
+        tsl::htrie_policy::detail::unsigned_less<CharT>());
+    tsl_ht_assert(it != plan.first_chars.end() && *it == first_char);
+
+    return *plan.hash_nodes[std::size_t(it - plan.first_chars.begin())];
+  }
+
+  /**
    * Burst the node and use the copy constructor instead of move constructor for
    * the values. Also use this method for trivial value types like int, int*,
    * ... as it requires less book-keeping (thus faster) than the burst using
@@ -1763,19 +2440,16 @@ class htrie_hash {
                  !std::is_nothrow_move_assignable<U>::value ||
                  std::is_arithmetic<U>::value ||
                  std::is_pointer<U>::value)>::type* = nullptr>
-  std::unique_ptr<trie_node> burst(hash_node& node) {
-    const std::array<size_type, ALPHABET_SIZE> first_char_count =
-        get_first_char_count(node.array_hash().cbegin(),
-                             node.array_hash().cend());
+  node_ptr<trie_node> burst(hash_node& node) {
+    node_ptr<trie_node> new_node = make_node<trie_node>(allocator_ref());
+    const burst_plan plan = prepare_burst(node.array_hash(), *new_node);
 
-    auto new_node = make_unique<trie_node>();
     for (auto it = node.array_hash().cbegin(); it != node.array_hash().cend();
          ++it) {
       if (it.key_size() == 0) {
-        new_node->val_node() = make_unique<value_node>(it.value());
+        new_node->emplace_value(it.value());
       } else {
-        hash_node& hnode =
-            get_hash_node_for_char(first_char_count, *new_node, it.key()[0]);
+        hash_node& hnode = burst_target(plan, it.key()[0]);
         hnode.array_hash().insert_ks(it.key() + 1, it.key_size() - 1,
                                      it.value());
       }
@@ -1795,32 +2469,32 @@ class htrie_hash {
                              std::is_nothrow_move_assignable<U>::value &&
                              !std::is_arithmetic<U>::value &&
                              !std::is_pointer<U>::value>::type* = nullptr>
-  std::unique_ptr<trie_node> burst(hash_node& node) {
+  node_ptr<trie_node> burst(hash_node& node) {
     /**
      * We burst the node->array_hash() into multiple arrays hash. While doing
      * so, we move each value in the node->array_hash() into the new arrays
      * hash. After each move, we save a pointer to where the value has been
      * moved. In case of exception, we rollback these values into the original
      * node->array_hash().
+     *
+     * new_node is declared outside of the try block on purpose: it has to be
+     * alive in the catch block as moved_values_rollback points inside it.
      */
     std::vector<T*> moved_values_rollback;
     moved_values_rollback.reserve(node.array_hash().size());
 
+    node_ptr<trie_node> new_node = make_node<trie_node>(allocator_ref());
     try {
-      const std::array<size_type, ALPHABET_SIZE> first_char_count =
-          get_first_char_count(node.array_hash().cbegin(),
-                               node.array_hash().cend());
+      const burst_plan plan = prepare_burst(node.array_hash(), *new_node);
 
-      auto new_node = make_unique<trie_node>();
       for (auto it = node.array_hash().begin(); it != node.array_hash().end();
            ++it) {
         if (it.key_size() == 0) {
-          new_node->val_node() = make_unique<value_node>(std::move(it.value()));
+          new_node->emplace_value(std::move(it.value()));
           moved_values_rollback.push_back(
-              std::addressof(new_node->val_node()->m_value));
+              std::addressof(new_node->value_ref().m_value));
         } else {
-          hash_node& hnode =
-              get_hash_node_for_char(first_char_count, *new_node, it.key()[0]);
+          hash_node& hnode = burst_target(plan, it.key()[0]);
           auto it_insert = hnode.array_hash().insert_ks(
               it.key() + 1, it.key_size() - 1, std::move(it.value()));
           moved_values_rollback.push_back(
@@ -1846,56 +2520,22 @@ class htrie_hash {
 
   template <class U = T,
             typename std::enable_if<!has_value<U>::value>::type* = nullptr>
-  std::unique_ptr<trie_node> burst(hash_node& node) {
-    const std::array<size_type, ALPHABET_SIZE> first_char_count =
-        get_first_char_count(node.array_hash().begin(),
-                             node.array_hash().end());
+  node_ptr<trie_node> burst(hash_node& node) {
+    node_ptr<trie_node> new_node = make_node<trie_node>(allocator_ref());
+    const burst_plan plan = prepare_burst(node.array_hash(), *new_node);
 
-    auto new_node = make_unique<trie_node>();
     for (auto it = node.array_hash().cbegin(); it != node.array_hash().cend();
          ++it) {
       if (it.key_size() == 0) {
-        new_node->val_node() = make_unique<value_node>();
+        new_node->emplace_value();
       } else {
-        hash_node& hnode =
-            get_hash_node_for_char(first_char_count, *new_node, it.key()[0]);
+        hash_node& hnode = burst_target(plan, it.key()[0]);
         hnode.array_hash().insert_ks(it.key() + 1, it.key_size() - 1);
       }
     }
 
     tsl_ht_assert(!new_node->empty());
     return new_node;
-  }
-
-  std::array<size_type, ALPHABET_SIZE> get_first_char_count(
-      typename array_hash_type::const_iterator begin,
-      typename array_hash_type::const_iterator end) const {
-    std::array<size_type, ALPHABET_SIZE> count{{}};
-    for (auto it = begin; it != end; ++it) {
-      if (it.key_size() == 0) {
-        continue;
-      }
-
-      count[as_position(it.key()[0])]++;
-    }
-
-    return count;
-  }
-
-  hash_node& get_hash_node_for_char(
-      const std::array<size_type, ALPHABET_SIZE>& first_char_count,
-      trie_node& tnode, CharT for_char) {
-    if (tnode.child(for_char) == nullptr) {
-      const size_type nb_buckets =
-          size_type(std::ceil(float(first_char_count[as_position(for_char)] +
-                                    HASH_NODE_DEFAULT_INIT_BUCKETS_COUNT / 2) /
-                              m_max_load_factor));
-
-      tnode.set_child(for_char, make_unique<hash_node>(nb_buckets, m_hash,
-                                                       m_max_load_factor));
-    }
-
-    return tnode.child(for_char)->as_hash_node();
   }
 
   iterator mutable_iterator(const_iterator it) noexcept {
@@ -1922,7 +2562,7 @@ class htrie_hash {
 
       return prefix_iterator(const_cast<trie_node*>(it.m_current_trie_node),
                              nullptr, default_it, default_it,
-                             it.m_read_trie_node_value, "");
+                             it.m_read_trie_node_value, key_buffer_type());
     } else {
       hash_node* hnode = const_cast<hash_node*>(it.m_current_hash_node);
       return prefix_iterator(
@@ -1947,7 +2587,7 @@ class htrie_hash {
     const slz_size_type burst_threshold = m_burst_threshold;
     serializer(burst_threshold);
 
-    std::basic_string<CharT> str_buffer;
+    key_buffer_type str_buffer;
 
     auto it = begin();
     auto last = end();
@@ -2058,8 +2698,10 @@ class htrie_hash {
         if (str_size == 0) {
           tsl_ht_assert(m_nb_elements == 0 && !m_root);
 
-          m_root = make_unique<hash_node>(
-              array_hash_type::deserialize(deserializer, hash_compatible));
+          m_root = make_node<hash_node>(
+              allocator_ref(),
+              array_hash_type::deserialize(deserializer, hash_compatible,
+                                           allocator_ref()));
           m_nb_elements += m_root->as_hash_node().array_hash().size();
 
           tsl_ht_assert(m_nb_elements == nb_elements);
@@ -2067,8 +2709,10 @@ class htrie_hash {
           str_buffer.resize(str_size);
           deserializer(str_buffer.data(), str_size);
 
-          auto hnode = make_unique<hash_node>(
-              array_hash_type::deserialize(deserializer, hash_compatible));
+          auto hnode = make_node<hash_node>(
+              allocator_ref(),
+              array_hash_type::deserialize(deserializer, hash_compatible,
+                                           allocator_ref()));
           m_nb_elements += hnode->array_hash().size();
 
           trie_node* current_node =
@@ -2086,16 +2730,19 @@ class htrie_hash {
   trie_node* insert_prefix_trie_nodes(const CharT* prefix,
                                       std::size_t prefix_size) {
     if (m_root == nullptr) {
-      m_root = make_unique<trie_node>();
+      m_root = make_node<trie_node>(allocator_ref());
     }
 
     trie_node* current_node = &m_root->as_trie_node();
     for (std::size_t iprefix = 0; iprefix < prefix_size; iprefix++) {
-      if (current_node->child(prefix[iprefix]) == nullptr) {
-        current_node->set_child(prefix[iprefix], make_unique<trie_node>());
+      anode* next_node = current_node->child(prefix[iprefix]);
+      if (next_node == nullptr) {
+        current_node->set_child(prefix[iprefix],
+                                make_node<trie_node>(allocator_ref()));
+        next_node = current_node->child(prefix[iprefix]);
       }
 
-      current_node = &current_node->child(prefix[iprefix])->as_trie_node();
+      current_node = &next_node->as_trie_node();
     }
 
     return current_node;
@@ -2105,17 +2752,16 @@ class htrie_hash {
             typename std::enable_if<!has_value<U>::value>::type* = nullptr>
   void deserialize_value_node(Deserializer& /*deserializer*/,
                               trie_node* current_node) {
-    tsl_ht_assert(!current_node->val_node());
-    current_node->val_node() = make_unique<value_node>();
+    tsl_ht_assert(!current_node->has_value());
+    current_node->emplace_value();
   }
 
   template <class Deserializer, class U = T,
             typename std::enable_if<has_value<U>::value>::type* = nullptr>
   void deserialize_value_node(Deserializer& deserializer,
                               trie_node* current_node) {
-    tsl_ht_assert(!current_node->val_node());
-    current_node->val_node() =
-        make_unique<value_node>(deserialize_value<T>(deserializer));
+    tsl_ht_assert(!current_node->has_value());
+    current_node->emplace_value(deserialize_value<T>(deserializer));
   }
 
   template <class U, class Deserializer>
@@ -2127,13 +2773,6 @@ class htrie_hash {
 #else
     return deserializer.Deserializer::template operator()<U>();
 #endif
-  }
-
-  // Same as std::make_unique for non-array types which is only available in
-  // C++14 (we need to support C++11).
-  template <typename U, typename... Args>
-  static std::unique_ptr<U> make_unique(Args&&... args) {
-    return std::unique_ptr<U>(new U(std::forward<Args>(args)...));
   }
 
  public:
@@ -2159,7 +2798,7 @@ class htrie_hash {
   static const size_type MAX_BURST_THRESHOLD =
       std::numeric_limits<ArrayHashIndexSizeT>::max();
 
-  std::unique_ptr<anode> m_root;
+  node_handle m_root;
   size_type m_nb_elements;
   Hash m_hash;
   float m_max_load_factor;

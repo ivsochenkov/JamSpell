@@ -131,8 +131,6 @@ public:
         static opt_t ReadFromEnv();
     };
 
-    using scored_candidates_t = std::vector<candidates_t>;
-
     explicit TSpellCorrector (opt_t const & opt = opt_t::ReadFromEnv());
 
     bool LoadLangModel(const std::string& modelFile);

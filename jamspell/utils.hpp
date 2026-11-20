@@ -367,8 +367,6 @@ struct cntxt_word_t
 {
     using cand_ref_t = std::reference_wrapper<cand_word_t>;
 
-    cntxt_word_t() = default;
-
     explicit cntxt_word_t(token_info_t const & tinf)
     : candidates{}
     , best_cand{orig_word}

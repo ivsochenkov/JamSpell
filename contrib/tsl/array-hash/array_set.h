@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -65,15 +66,17 @@ template <class CharT, class Hash = tsl::ah::str_hash<CharT>,
           class KeyEqual = tsl::ah::str_equal<CharT>,
           bool StoreNullTerminator = true, class KeySizeT = std::uint16_t,
           class IndexSizeT = std::uint32_t,
-          class GrowthPolicy = tsl::ah::power_of_two_growth_policy<2>>
+          class GrowthPolicy = tsl::ah::power_of_two_growth_policy<2>,
+          class Allocator = std::allocator<CharT>>
 class array_set {
  private:
   template <typename U>
   using is_iterator = tsl::detail_array_hash::is_iterator<U>;
 
-  using ht = tsl::detail_array_hash::array_hash<CharT, void, Hash, KeyEqual,
-                                                StoreNullTerminator, KeySizeT,
-                                                IndexSizeT, GrowthPolicy>;
+  using ht =
+      tsl::detail_array_hash::array_hash<CharT, void, Hash, KeyEqual,
+                                         StoreNullTerminator, KeySizeT,
+                                         IndexSizeT, GrowthPolicy, Allocator>;
 
  public:
   using char_type = typename ht::char_type;
@@ -82,35 +85,52 @@ class array_set {
   using size_type = typename ht::size_type;
   using hasher = typename ht::hasher;
   using key_equal = typename ht::key_equal;
+  using allocator_type = Allocator;
   using iterator = typename ht::iterator;
   using const_iterator = typename ht::const_iterator;
 
   array_set() : array_set(ht::DEFAULT_INIT_BUCKET_COUNT) {}
 
-  explicit array_set(size_type bucket_count, const Hash& hash = Hash())
-      : m_ht(bucket_count, hash, ht::DEFAULT_MAX_LOAD_FACTOR) {}
+  explicit array_set(const Allocator& alloc)
+      : array_set(ht::DEFAULT_INIT_BUCKET_COUNT, Hash(), alloc) {}
+
+  explicit array_set(size_type bucket_count, const Hash& hash = Hash(),
+                     const Allocator& alloc = Allocator())
+      : m_ht(bucket_count, hash, ht::DEFAULT_MAX_LOAD_FACTOR, alloc) {}
+
+  array_set(size_type bucket_count, const Allocator& alloc)
+      : array_set(bucket_count, Hash(), alloc) {}
+
+  /**
+   * Copy/move with a specific allocator (used by allocator-aware containers).
+   */
+  array_set(const array_set& other, const Allocator& alloc)
+      : m_ht(other.m_ht, alloc) {}
+
+  array_set(array_set&& other, const Allocator& alloc)
+      : m_ht(std::move(other.m_ht), alloc) {}
 
   template <class InputIt, typename std::enable_if<
                                is_iterator<InputIt>::value>::type* = nullptr>
   array_set(InputIt first, InputIt last,
             size_type bucket_count = ht::DEFAULT_INIT_BUCKET_COUNT,
-            const Hash& hash = Hash())
-      : array_set(bucket_count, hash) {
+            const Hash& hash = Hash(), const Allocator& alloc = Allocator())
+      : array_set(bucket_count, hash, alloc) {
     insert(first, last);
   }
 
 #ifdef TSL_AH_HAS_STRING_VIEW
   array_set(std::initializer_list<std::basic_string_view<CharT>> init,
             size_type bucket_count = ht::DEFAULT_INIT_BUCKET_COUNT,
-            const Hash& hash = Hash())
-      : array_set(bucket_count, hash) {
+            const Hash& hash = Hash(), const Allocator& alloc = Allocator())
+      : array_set(bucket_count, hash, alloc) {
     insert(init);
   }
 #else
   array_set(std::initializer_list<const CharT*> init,
             size_type bucket_count = ht::DEFAULT_INIT_BUCKET_COUNT,
-            const Hash& hash = Hash())
-      : array_set(bucket_count, hash) {
+            const Hash& hash = Hash(), const Allocator& alloc = Allocator())
+      : array_set(bucket_count, hash, alloc) {
     insert(init);
   }
 #endif
@@ -606,6 +626,8 @@ class array_set {
    * Observers
    */
   hasher hash_function() const { return m_ht.hash_function(); }
+
+  allocator_type get_allocator() const { return m_ht.get_allocator(); }
   key_equal key_eq() const { return m_ht.key_eq(); }
 
   /*
@@ -663,8 +685,9 @@ class array_set {
    */
   template <class Deserializer>
   static array_set deserialize(Deserializer& deserializer,
-                               bool hash_compatible = false) {
-    array_set set(0);
+                               bool hash_compatible = false,
+                               const Allocator& alloc = Allocator()) {
+    array_set set(0, Hash(), alloc);
     set.m_ht.deserialize(deserializer, hash_compatible);
 
     return set;
@@ -707,10 +730,11 @@ class array_set {
 template <class CharT, class Hash = tsl::ah::str_hash<CharT>,
           class KeyEqual = tsl::ah::str_equal<CharT>,
           bool StoreNullTerminator = true, class KeySizeT = std::uint16_t,
-          class IndexSizeT = std::uint32_t>
+          class IndexSizeT = std::uint32_t,
+          class Allocator = std::allocator<CharT>>
 using array_pg_set =
     array_set<CharT, Hash, KeyEqual, StoreNullTerminator, KeySizeT, IndexSizeT,
-              tsl::ah::prime_growth_policy>;
+              tsl::ah::prime_growth_policy, Allocator>;
 
 }  // end namespace tsl
 

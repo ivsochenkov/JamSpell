@@ -27,6 +27,7 @@
 #include <cstddef>
 #include <cstring>
 #include <initializer_list>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -40,24 +41,50 @@ namespace tsl {
  * The value T must be either nothrow move-constructible/assignable,
  * copy-constructible or both.
  *
+ * A key is a sequence of "letters" of type CharT, which can be any integral
+ * type (but bool): char, wchar_t, char16_t, char32_t, std::uint16_t, unsigned
+ * int, ... Where a key is expected (insert, find, erase, ...) it can be given
+ * as a null-terminated array (`const CharT*`) or as any contiguous container
+ * of CharT having data() and size() (std::basic_string, std::basic_string_view,
+ * std::vector<CharT>, std::array<CharT, N>, ...). The `_ks` variants take a
+ * pointer and a size instead. `iterator::key()` returns a
+ * std::basic_string<CharT> when it is usable with CharT (char, wchar_t,
+ * char16_t, char32_t, char8_t) and a std::vector<CharT> otherwise, see
+ * `key_buffer_type`.
+ *
  * The size of a key string is limited to std::numeric_limits<KeySizeT>::max()
  * - 1. That is 65 535 characters by default, but can be raised with the
  * KeySizeT template parameter. See max_key_size() for an easy access to this
  * limit.
+ *
+ * ChildrenPolicy selects how the inner (trie) nodes store their children, see
+ * tsl/htrie_children_policies.h. The default is a dense array indexed by the
+ * letter for 8 bits letters and a sorted flat map for wider ones.
+ *
+ * Allocator is the allocator all the memory of the map comes from. It can be
+ * stateful and use fancy pointers, so the map can be built in a shared
+ * memory segment or a memory mapped file (for example with a
+ * boost::interprocess::allocator) and mapped at different addresses by
+ * different processes. See the README for the requirements.
  *
  * Iterators invalidation:
  *  - clear, operator=: always invalidate the iterators.
  *  - insert, emplace, operator[]: always invalidate the iterators.
  *  - erase: always invalidate the iterators.
  */
-template <class CharT, class T, class Hash = tsl::ah::str_hash<CharT>,
-          class KeySizeT = std::uint16_t>
+template <class CharT, class T,
+          class Hash = tsl::detail_htrie_hash::default_hash<CharT>,
+          class KeySizeT = std::uint16_t,
+          class ChildrenPolicy =
+              tsl::htrie_policy::default_children_policy<CharT>,
+          class Allocator = std::allocator<char>>
 class htrie_map {
  private:
   template <typename U>
   using is_iterator = tsl::detail_array_hash::is_iterator<U>;
 
-  using ht = tsl::detail_htrie_hash::htrie_hash<CharT, T, Hash, KeySizeT>;
+  using ht = tsl::detail_htrie_hash::htrie_hash<CharT, T, Hash, KeySizeT,
+                                                ChildrenPolicy, Allocator>;
 
  public:
   using char_type = typename ht::char_type;
@@ -65,59 +92,61 @@ class htrie_map {
   using key_size_type = typename ht::key_size_type;
   using size_type = typename ht::size_type;
   using hasher = typename ht::hasher;
+  using allocator_type = typename ht::allocator_type;
+  using children_policy = typename ht::children_policy;
+  using key_buffer_type = typename ht::key_buffer_type;
+  using key_view = tsl::detail_htrie_hash::basic_key_view<CharT>;
   using iterator = typename ht::iterator;
   using const_iterator = typename ht::const_iterator;
   using prefix_iterator = typename ht::prefix_iterator;
   using const_prefix_iterator = typename ht::const_prefix_iterator;
 
  public:
-  explicit htrie_map(const Hash& hash = Hash())
+  explicit htrie_map(const Hash& hash = Hash(),
+                     const Allocator& alloc = Allocator())
       : m_ht(hash, ht::HASH_NODE_DEFAULT_MAX_LOAD_FACTOR,
-             ht::DEFAULT_BURST_THRESHOLD) {}
+             ht::DEFAULT_BURST_THRESHOLD, alloc) {}
 
-  explicit htrie_map(size_type burst_threshold, const Hash& hash = Hash())
-      : m_ht(hash, ht::HASH_NODE_DEFAULT_MAX_LOAD_FACTOR, burst_threshold) {}
+  explicit htrie_map(const Allocator& alloc) : htrie_map(Hash(), alloc) {}
+
+  explicit htrie_map(size_type burst_threshold, const Hash& hash = Hash(),
+                     const Allocator& alloc = Allocator())
+      : m_ht(hash, ht::HASH_NODE_DEFAULT_MAX_LOAD_FACTOR, burst_threshold,
+             alloc) {}
+
+  htrie_map(size_type burst_threshold, const Allocator& alloc)
+      : htrie_map(burst_threshold, Hash(), alloc) {}
 
   template <class InputIt, typename std::enable_if<
                                is_iterator<InputIt>::value>::type* = nullptr>
-  htrie_map(InputIt first, InputIt last, const Hash& hash = Hash())
-      : htrie_map(hash) {
+  htrie_map(InputIt first, InputIt last, const Hash& hash = Hash(),
+            const Allocator& alloc = Allocator())
+      : htrie_map(hash, alloc) {
     insert(first, last);
   }
 
-#ifdef TSL_HT_HAS_STRING_VIEW
-  htrie_map(
-      std::initializer_list<std::pair<std::basic_string_view<CharT>, T>> init,
-      const Hash& hash = Hash())
-      : htrie_map(hash) {
-    insert(init);
-  }
-#else
-  htrie_map(std::initializer_list<std::pair<const CharT*, T>> init,
-            const Hash& hash = Hash())
-      : htrie_map(hash) {
-    insert(init);
-  }
-#endif
+  /**
+   * Copy/move with a specific allocator, like the allocator extended
+   * constructors of the standard containers.
+   */
+  htrie_map(const htrie_map& other, const Allocator& alloc)
+      : m_ht(other.m_ht, alloc) {}
 
-#ifdef TSL_HT_HAS_STRING_VIEW
-  htrie_map& operator=(
-      std::initializer_list<std::pair<std::basic_string_view<CharT>, T>>
-          ilist) {
+  htrie_map(htrie_map&& other, const Allocator& alloc)
+      : m_ht(std::move(other.m_ht), alloc) {}
+
+  htrie_map(std::initializer_list<std::pair<key_view, T>> init,
+            const Hash& hash = Hash(), const Allocator& alloc = Allocator())
+      : htrie_map(hash, alloc) {
+    insert(init);
+  }
+
+  htrie_map& operator=(std::initializer_list<std::pair<key_view, T>> ilist) {
     clear();
     insert(ilist);
 
     return *this;
   }
-#else
-  htrie_map& operator=(
-      std::initializer_list<std::pair<const CharT*, T>> ilist) {
-    clear();
-    insert(ilist);
-
-    return *this;
-  }
-#endif
 
   /*
    * Iterators
@@ -152,41 +181,19 @@ class htrie_map {
                                       const T& value) {
     return m_ht.insert(key, key_size, value);
   }
-#ifdef TSL_HT_HAS_STRING_VIEW
-  std::pair<iterator, bool> insert(const std::basic_string_view<CharT>& key,
-                                   const T& value) {
-    return m_ht.insert(key.data(), key.size(), value);
-  }
-#else
-  std::pair<iterator, bool> insert(const CharT* key, const T& value) {
-    return m_ht.insert(key, std::strlen(key), value);
-  }
 
-  std::pair<iterator, bool> insert(const std::basic_string<CharT>& key,
-                                   const T& value) {
+  std::pair<iterator, bool> insert(const key_view& key, const T& value) {
     return m_ht.insert(key.data(), key.size(), value);
   }
-#endif
 
   std::pair<iterator, bool> insert_ks(const CharT* key, size_type key_size,
                                       T&& value) {
     return m_ht.insert(key, key_size, std::move(value));
   }
-#ifdef TSL_HT_HAS_STRING_VIEW
-  std::pair<iterator, bool> insert(const std::basic_string_view<CharT>& key,
-                                   T&& value) {
-    return m_ht.insert(key.data(), key.size(), std::move(value));
-  }
-#else
-  std::pair<iterator, bool> insert(const CharT* key, T&& value) {
-    return m_ht.insert(key, std::strlen(key), std::move(value));
-  }
 
-  std::pair<iterator, bool> insert(const std::basic_string<CharT>& key,
-                                   T&& value) {
+  std::pair<iterator, bool> insert(const key_view& key, T&& value) {
     return m_ht.insert(key.data(), key.size(), std::move(value));
   }
-#endif
 
   template <class InputIt, typename std::enable_if<
                                is_iterator<InputIt>::value>::type* = nullptr>
@@ -196,40 +203,20 @@ class htrie_map {
     }
   }
 
-#ifdef TSL_HT_HAS_STRING_VIEW
-  void insert(std::initializer_list<std::pair<std::basic_string_view<CharT>, T>>
-                  ilist) {
+  void insert(std::initializer_list<std::pair<key_view, T>> ilist) {
     insert(ilist.begin(), ilist.end());
   }
-#else
-  void insert(std::initializer_list<std::pair<const CharT*, T>> ilist) {
-    insert(ilist.begin(), ilist.end());
-  }
-#endif
 
   template <class... Args>
   std::pair<iterator, bool> emplace_ks(const CharT* key, size_type key_size,
                                        Args&&... args) {
     return m_ht.insert(key, key_size, std::forward<Args>(args)...);
   }
-#ifdef TSL_HT_HAS_STRING_VIEW
-  template <class... Args>
-  std::pair<iterator, bool> emplace(const std::basic_string_view<CharT>& key,
-                                    Args&&... args) {
-    return m_ht.insert(key.data(), key.size(), std::forward<Args>(args)...);
-  }
-#else
-  template <class... Args>
-  std::pair<iterator, bool> emplace(const CharT* key, Args&&... args) {
-    return m_ht.insert(key, std::strlen(key), std::forward<Args>(args)...);
-  }
 
   template <class... Args>
-  std::pair<iterator, bool> emplace(const std::basic_string<CharT>& key,
-                                    Args&&... args) {
+  std::pair<iterator, bool> emplace(const key_view& key, Args&&... args) {
     return m_ht.insert(key.data(), key.size(), std::forward<Args>(args)...);
   }
-#endif
 
   iterator erase(const_iterator pos) { return m_ht.erase(pos); }
   iterator erase(const_iterator first, const_iterator last) {
@@ -239,19 +226,10 @@ class htrie_map {
   size_type erase_ks(const CharT* key, size_type key_size) {
     return m_ht.erase(key, key_size);
   }
-#ifdef TSL_HT_HAS_STRING_VIEW
-  size_type erase(const std::basic_string_view<CharT>& key) {
-    return m_ht.erase(key.data(), key.size());
-  }
-#else
-  size_type erase(const CharT* key) {
-    return m_ht.erase(key, std::strlen(key));
-  }
 
-  size_type erase(const std::basic_string<CharT>& key) {
+  size_type erase(const key_view& key) {
     return m_ht.erase(key.data(), key.size());
   }
-#endif
 
   /**
    * Erase all the elements which have 'prefix' as prefix. Return the number of
@@ -260,28 +238,13 @@ class htrie_map {
   size_type erase_prefix_ks(const CharT* prefix, size_type prefix_size) {
     return m_ht.erase_prefix(prefix, prefix_size);
   }
-#ifdef TSL_HT_HAS_STRING_VIEW
-  /**
-   * @copydoc erase_prefix_ks(const CharT* prefix, size_type prefix_size)
-   */
-  size_type erase_prefix(const std::basic_string_view<CharT>& prefix) {
-    return m_ht.erase_prefix(prefix.data(), prefix.size());
-  }
-#else
-  /**
-   * @copydoc erase_prefix_ks(const CharT* prefix, size_type prefix_size)
-   */
-  size_type erase_prefix(const CharT* prefix) {
-    return m_ht.erase_prefix(prefix, std::strlen(prefix));
-  }
 
   /**
    * @copydoc erase_prefix_ks(const CharT* prefix, size_type prefix_size)
    */
-  size_type erase_prefix(const std::basic_string<CharT>& prefix) {
+  size_type erase_prefix(const key_view& prefix) {
     return m_ht.erase_prefix(prefix.data(), prefix.size());
   }
-#endif
 
   void swap(htrie_map& other) { other.m_ht.swap(m_ht); }
 
@@ -295,53 +258,22 @@ class htrie_map {
     return m_ht.at(key, key_size);
   }
 
-#ifdef TSL_HT_HAS_STRING_VIEW
-  T& at(const std::basic_string_view<CharT>& key) {
+  T& at(const key_view& key) { return m_ht.at(key.data(), key.size()); }
+  const T& at(const key_view& key) const {
     return m_ht.at(key.data(), key.size());
   }
-  const T& at(const std::basic_string_view<CharT>& key) const {
-    return m_ht.at(key.data(), key.size());
-  }
-#else
-  T& at(const CharT* key) { return m_ht.at(key, std::strlen(key)); }
-  const T& at(const CharT* key) const { return m_ht.at(key, std::strlen(key)); }
 
-  T& at(const std::basic_string<CharT>& key) {
-    return m_ht.at(key.data(), key.size());
-  }
-  const T& at(const std::basic_string<CharT>& key) const {
-    return m_ht.at(key.data(), key.size());
-  }
-#endif
-
-#ifdef TSL_HT_HAS_STRING_VIEW
-  T& operator[](const std::basic_string_view<CharT>& key) {
+  T& operator[](const key_view& key) {
     return m_ht.access_operator(key.data(), key.size());
   }
-#else
-  T& operator[](const CharT* key) {
-    return m_ht.access_operator(key, std::strlen(key));
-  }
-  T& operator[](const std::basic_string<CharT>& key) {
-    return m_ht.access_operator(key.data(), key.size());
-  }
-#endif
 
   size_type count_ks(const CharT* key, size_type key_size) const {
     return m_ht.count(key, key_size);
   }
-#ifdef TSL_HT_HAS_STRING_VIEW
-  size_type count(const std::basic_string_view<CharT>& key) const {
+
+  size_type count(const key_view& key) const {
     return m_ht.count(key.data(), key.size());
   }
-#else
-  size_type count(const CharT* key) const {
-    return m_ht.count(key, std::strlen(key));
-  }
-  size_type count(const std::basic_string<CharT>& key) const {
-    return m_ht.count(key.data(), key.size());
-  }
-#endif
 
   iterator find_ks(const CharT* key, size_type key_size) {
     return m_ht.find(key, key_size);
@@ -350,29 +282,14 @@ class htrie_map {
   const_iterator find_ks(const CharT* key, size_type key_size) const {
     return m_ht.find(key, key_size);
   }
-#ifdef TSL_HT_HAS_STRING_VIEW
-  iterator find(const std::basic_string_view<CharT>& key) {
+
+  iterator find(const key_view& key) {
     return m_ht.find(key.data(), key.size());
   }
 
-  const_iterator find(const std::basic_string_view<CharT>& key) const {
+  const_iterator find(const key_view& key) const {
     return m_ht.find(key.data(), key.size());
   }
-#else
-  iterator find(const CharT* key) { return m_ht.find(key, std::strlen(key)); }
-
-  const_iterator find(const CharT* key) const {
-    return m_ht.find(key, std::strlen(key));
-  }
-
-  iterator find(const std::basic_string<CharT>& key) {
-    return m_ht.find(key.data(), key.size());
-  }
-
-  const_iterator find(const std::basic_string<CharT>& key) const {
-    return m_ht.find(key.data(), key.size());
-  }
-#endif
 
   std::pair<iterator, iterator> equal_range_ks(const CharT* key,
                                                size_type key_size) {
@@ -383,36 +300,15 @@ class htrie_map {
       const CharT* key, size_type key_size) const {
     return m_ht.equal_range(key, key_size);
   }
-#ifdef TSL_HT_HAS_STRING_VIEW
-  std::pair<iterator, iterator> equal_range(
-      const std::basic_string_view<CharT>& key) {
+
+  std::pair<iterator, iterator> equal_range(const key_view& key) {
     return m_ht.equal_range(key.data(), key.size());
   }
 
   std::pair<const_iterator, const_iterator> equal_range(
-      const std::basic_string_view<CharT>& key) const {
+      const key_view& key) const {
     return m_ht.equal_range(key.data(), key.size());
   }
-#else
-  std::pair<iterator, iterator> equal_range(const CharT* key) {
-    return m_ht.equal_range(key, std::strlen(key));
-  }
-
-  std::pair<const_iterator, const_iterator> equal_range(
-      const CharT* key) const {
-    return m_ht.equal_range(key, std::strlen(key));
-  }
-
-  std::pair<iterator, iterator> equal_range(
-      const std::basic_string<CharT>& key) {
-    return m_ht.equal_range(key.data(), key.size());
-  }
-
-  std::pair<const_iterator, const_iterator> equal_range(
-      const std::basic_string<CharT>& key) const {
-    return m_ht.equal_range(key.data(), key.size());
-  }
-#endif
 
   /**
    * Return a range containing all the elements which have 'prefix' as prefix.
@@ -431,12 +327,12 @@ class htrie_map {
       const CharT* prefix, size_type prefix_size) const {
     return m_ht.equal_prefix_range(prefix, prefix_size);
   }
-#ifdef TSL_HT_HAS_STRING_VIEW
+
   /**
    * @copydoc equal_prefix_range_ks(const CharT* prefix, size_type prefix_size)
    */
   std::pair<prefix_iterator, prefix_iterator> equal_prefix_range(
-      const std::basic_string_view<CharT>& prefix) {
+      const key_view& prefix) {
     return m_ht.equal_prefix_range(prefix.data(), prefix.size());
   }
 
@@ -444,42 +340,9 @@ class htrie_map {
    * @copydoc equal_prefix_range_ks(const CharT* prefix, size_type prefix_size)
    */
   std::pair<const_prefix_iterator, const_prefix_iterator> equal_prefix_range(
-      const std::basic_string_view<CharT>& prefix) const {
+      const key_view& prefix) const {
     return m_ht.equal_prefix_range(prefix.data(), prefix.size());
   }
-#else
-  /**
-   * @copydoc equal_prefix_range_ks(const CharT* prefix, size_type prefix_size)
-   */
-  std::pair<prefix_iterator, prefix_iterator> equal_prefix_range(
-      const CharT* prefix) {
-    return m_ht.equal_prefix_range(prefix, std::strlen(prefix));
-  }
-
-  /**
-   * @copydoc equal_prefix_range_ks(const CharT* prefix, size_type prefix_size)
-   */
-  std::pair<const_prefix_iterator, const_prefix_iterator> equal_prefix_range(
-      const CharT* prefix) const {
-    return m_ht.equal_prefix_range(prefix, std::strlen(prefix));
-  }
-
-  /**
-   * @copydoc equal_prefix_range_ks(const CharT* prefix, size_type prefix_size)
-   */
-  std::pair<prefix_iterator, prefix_iterator> equal_prefix_range(
-      const std::basic_string<CharT>& prefix) {
-    return m_ht.equal_prefix_range(prefix.data(), prefix.size());
-  }
-
-  /**
-   * @copydoc equal_prefix_range_ks(const CharT* prefix, size_type prefix_size)
-   */
-  std::pair<const_prefix_iterator, const_prefix_iterator> equal_prefix_range(
-      const std::basic_string<CharT>& prefix) const {
-    return m_ht.equal_prefix_range(prefix.data(), prefix.size());
-  }
-#endif
 
   /**
    * Return the element in the trie which is the longest prefix of `key`. If no
@@ -506,50 +369,20 @@ class htrie_map {
   const_iterator longest_prefix_ks(const CharT* key, size_type key_size) const {
     return m_ht.longest_prefix(key, key_size);
   }
-#ifdef TSL_HT_HAS_STRING_VIEW
+
   /**
    * @copydoc longest_prefix_ks(const CharT* key, size_type key_size)
    */
-  iterator longest_prefix(const std::basic_string_view<CharT>& key) {
+  iterator longest_prefix(const key_view& key) {
     return m_ht.longest_prefix(key.data(), key.size());
   }
 
   /**
    * @copydoc longest_prefix_ks(const CharT* key, size_type key_size)
    */
-  const_iterator longest_prefix(
-      const std::basic_string_view<CharT>& key) const {
+  const_iterator longest_prefix(const key_view& key) const {
     return m_ht.longest_prefix(key.data(), key.size());
   }
-#else
-  /**
-   * @copydoc longest_prefix_ks(const CharT* key, size_type key_size)
-   */
-  iterator longest_prefix(const CharT* key) {
-    return m_ht.longest_prefix(key, std::strlen(key));
-  }
-
-  /**
-   * @copydoc longest_prefix_ks(const CharT* key, size_type key_size)
-   */
-  const_iterator longest_prefix(const CharT* key) const {
-    return m_ht.longest_prefix(key, std::strlen(key));
-  }
-
-  /**
-   * @copydoc longest_prefix_ks(const CharT* key, size_type key_size)
-   */
-  iterator longest_prefix(const std::basic_string<CharT>& key) {
-    return m_ht.longest_prefix(key.data(), key.size());
-  }
-
-  /**
-   * @copydoc longest_prefix_ks(const CharT* key, size_type key_size)
-   */
-  const_iterator longest_prefix(const std::basic_string<CharT>& key) const {
-    return m_ht.longest_prefix(key.data(), key.size());
-  }
-#endif
 
   /**
    * Invoke the given `visitor` function for each element in the trie which is
@@ -567,9 +400,9 @@ class htrie_map {
    *
    *     map.for_each_prefix_of("/foo", print); // prints "/foo"
    *     map.for_each_prefix_of("/foo/baz", print); // prints "/foo"
-   *     map.for_each_prefix_of("/foo/bar/baz", print); // prints "/foo" and "/foo/bar"
-   *     map.for_each_prefix_of("/foo/bar/", print); // prints "/foo" and "/foo/bar"
-   *     map.for_each_prefix_of("/bar", print); // prints nothing
+   *     map.for_each_prefix_of("/foo/bar/baz", print); // prints "/foo" and
+   * "/foo/bar" map.for_each_prefix_of("/foo/bar/", print); // prints "/foo" and
+   * "/foo/bar" map.for_each_prefix_of("/bar", print); // prints nothing
    *     map.for_each_prefix_of("", print); // prints nothing
    */
   template <typename F>
@@ -586,13 +419,12 @@ class htrie_map {
                              F&& visitor) const {
     return m_ht.for_each_prefix_of(key, key_size, std::forward<F>(visitor));
   }
-#ifdef TSL_HT_HAS_STRING_VIEW
+
   /**
    * @copydoc for_each_prefix_of_ks(const CharT*, size_type, F&&)
    */
   template <typename F>
-  void for_each_prefix_of(const std::basic_string_view<CharT>& key,
-                          F&& visitor) {
+  void for_each_prefix_of(const key_view& key, F&& visitor) {
     return m_ht.for_each_prefix_of(key.data(), key.size(),
                                    std::forward<F>(visitor));
   }
@@ -601,49 +433,10 @@ class htrie_map {
    * @copydoc for_each_prefix_of_ks(const CharT*, size_type, F&&)
    */
   template <typename F>
-  void for_each_prefix_of(const std::basic_string_view<CharT>& key,
-                          F&& visitor) const {
+  void for_each_prefix_of(const key_view& key, F&& visitor) const {
     return m_ht.for_each_prefix_of(key.data(), key.size(),
                                    std::forward<F>(visitor));
   }
-#else
-  /**
-   * @copydoc for_each_prefix_of_ks(const CharT*, size_type, F&&)
-   */
-  template <typename F>
-  void for_each_prefix_of(const CharT* key, F&& visitor) {
-    return m_ht.for_each_prefix_of(key, std::strlen(key),
-                                   std::forward<F>(visitor));
-  }
-
-  /**
-   * @copydoc for_each_prefix_of_ks(const CharT*, size_type, F&&)
-   */
-  template <typename F>
-  void for_each_prefix_of(const CharT* key, F&& visitor) const {
-    return m_ht.for_each_prefix_of(key, std::strlen(key),
-                                   std::forward<F>(visitor));
-  }
-
-  /**
-   * @copydoc for_each_prefix_of_ks(const CharT*, size_type, F&&)
-   */
-  template <typename F>
-  void for_each_prefix_of(const std::basic_string<CharT>& key, F&& visitor) {
-    return m_ht.for_each_prefix_of(key.data(), key.size(),
-                                   std::forward<F>(visitor));
-  }
-
-  /**
-   * @copydoc for_each_prefix_of_ks(const CharT*, size_type, F&&)
-   */
-  template <typename F>
-  void for_each_prefix_of(const std::basic_string<CharT>& key,
-                          F&& visitor) const {
-    return m_ht.for_each_prefix_of(key.data(), key.size(),
-                                   std::forward<F>(visitor));
-  }
-#endif
 
   /*
    *  Hash policy
@@ -661,6 +454,7 @@ class htrie_map {
    * Observers
    */
   hasher hash_function() const { return m_ht.hash_function(); }
+  allocator_type get_allocator() const { return m_ht.get_allocator(); }
 
   /*
    * Other
@@ -710,8 +504,9 @@ class htrie_map {
    */
   template <class Deserializer>
   static htrie_map deserialize(Deserializer& deserializer,
-                               bool hash_compatible = false) {
-    htrie_map map;
+                               bool hash_compatible = false,
+                               const Allocator& alloc = Allocator()) {
+    htrie_map map(alloc);
     map.m_ht.deserialize(deserializer, hash_compatible);
 
     return map;
@@ -722,11 +517,12 @@ class htrie_map {
       return false;
     }
 
-    std::string key_buffer;
+    key_buffer_type key_buffer;
     for (auto it = lhs.cbegin(); it != lhs.cend(); ++it) {
       it.key(key_buffer);
 
-      const auto it_element_rhs = rhs.find(key_buffer);
+      const auto it_element_rhs =
+          rhs.find_ks(key_buffer.data(), key_buffer.size());
       if (it_element_rhs == rhs.cend() ||
           it.value() != it_element_rhs.value()) {
         return false;

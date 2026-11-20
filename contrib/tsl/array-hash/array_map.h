@@ -28,6 +28,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -68,15 +69,17 @@ template <class CharT, class T, class Hash = tsl::ah::str_hash<CharT>,
           class KeyEqual = tsl::ah::str_equal<CharT>,
           bool StoreNullTerminator = true, class KeySizeT = std::uint16_t,
           class IndexSizeT = std::uint32_t,
-          class GrowthPolicy = tsl::ah::power_of_two_growth_policy<2>>
+          class GrowthPolicy = tsl::ah::power_of_two_growth_policy<2>,
+          class Allocator = std::allocator<CharT>>
 class array_map {
  private:
   template <typename U>
   using is_iterator = tsl::detail_array_hash::is_iterator<U>;
 
-  using ht = tsl::detail_array_hash::array_hash<CharT, T, Hash, KeyEqual,
-                                                StoreNullTerminator, KeySizeT,
-                                                IndexSizeT, GrowthPolicy>;
+  using ht =
+      tsl::detail_array_hash::array_hash<CharT, T, Hash, KeyEqual,
+                                         StoreNullTerminator, KeySizeT,
+                                         IndexSizeT, GrowthPolicy, Allocator>;
 
  public:
   using char_type = typename ht::char_type;
@@ -86,21 +89,38 @@ class array_map {
   using size_type = typename ht::size_type;
   using hasher = typename ht::hasher;
   using key_equal = typename ht::key_equal;
+  using allocator_type = Allocator;
   using iterator = typename ht::iterator;
   using const_iterator = typename ht::const_iterator;
 
  public:
   array_map() : array_map(ht::DEFAULT_INIT_BUCKET_COUNT) {}
 
-  explicit array_map(size_type bucket_count, const Hash& hash = Hash())
-      : m_ht(bucket_count, hash, ht::DEFAULT_MAX_LOAD_FACTOR) {}
+  explicit array_map(const Allocator& alloc)
+      : array_map(ht::DEFAULT_INIT_BUCKET_COUNT, Hash(), alloc) {}
+
+  explicit array_map(size_type bucket_count, const Hash& hash = Hash(),
+                     const Allocator& alloc = Allocator())
+      : m_ht(bucket_count, hash, ht::DEFAULT_MAX_LOAD_FACTOR, alloc) {}
+
+  array_map(size_type bucket_count, const Allocator& alloc)
+      : array_map(bucket_count, Hash(), alloc) {}
+
+  /**
+   * Copy/move with a specific allocator (used by allocator-aware containers).
+   */
+  array_map(const array_map& other, const Allocator& alloc)
+      : m_ht(other.m_ht, alloc) {}
+
+  array_map(array_map&& other, const Allocator& alloc)
+      : m_ht(std::move(other.m_ht), alloc) {}
 
   template <class InputIt, typename std::enable_if<
                                is_iterator<InputIt>::value>::type* = nullptr>
   array_map(InputIt first, InputIt last,
             size_type bucket_count = ht::DEFAULT_INIT_BUCKET_COUNT,
-            const Hash& hash = Hash())
-      : array_map(bucket_count, hash) {
+            const Hash& hash = Hash(), const Allocator& alloc = Allocator())
+      : array_map(bucket_count, hash, alloc) {
     insert(first, last);
   }
 
@@ -108,15 +128,15 @@ class array_map {
   array_map(
       std::initializer_list<std::pair<std::basic_string_view<CharT>, T>> init,
       size_type bucket_count = ht::DEFAULT_INIT_BUCKET_COUNT,
-      const Hash& hash = Hash())
-      : array_map(bucket_count, hash) {
+      const Hash& hash = Hash(), const Allocator& alloc = Allocator())
+      : array_map(bucket_count, hash, alloc) {
     insert(init);
   }
 #else
   array_map(std::initializer_list<std::pair<const CharT*, T>> init,
             size_type bucket_count = ht::DEFAULT_INIT_BUCKET_COUNT,
-            const Hash& hash = Hash())
-      : array_map(bucket_count, hash) {
+            const Hash& hash = Hash(), const Allocator& alloc = Allocator())
+      : array_map(bucket_count, hash, alloc) {
     insert(init);
   }
 #endif
@@ -807,6 +827,8 @@ class array_map {
    * Observers
    */
   hasher hash_function() const { return m_ht.hash_function(); }
+
+  allocator_type get_allocator() const { return m_ht.get_allocator(); }
   key_equal key_eq() const { return m_ht.key_eq(); }
 
   /*
@@ -864,8 +886,9 @@ class array_map {
    */
   template <class Deserializer>
   static array_map deserialize(Deserializer& deserializer,
-                               bool hash_compatible = false) {
-    array_map map(0);
+                               bool hash_compatible = false,
+                               const Allocator& alloc = Allocator()) {
+    array_map map(0, Hash(), alloc);
     map.m_ht.deserialize(deserializer, hash_compatible);
 
     return map;
@@ -920,10 +943,11 @@ class array_map {
 template <class CharT, class T, class Hash = tsl::ah::str_hash<CharT>,
           class KeyEqual = tsl::ah::str_equal<CharT>,
           bool StoreNullTerminator = true, class KeySizeT = std::uint16_t,
-          class IndexSizeT = std::uint32_t>
+          class IndexSizeT = std::uint32_t,
+          class Allocator = std::allocator<CharT>>
 using array_pg_map =
     array_map<CharT, T, Hash, KeyEqual, StoreNullTerminator, KeySizeT,
-              IndexSizeT, tsl::ah::prime_growth_policy>;
+              IndexSizeT, tsl::ah::prime_growth_policy, Allocator>;
 
 }  // end namespace tsl
 
