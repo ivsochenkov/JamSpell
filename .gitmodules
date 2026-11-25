@@ -1,0 +1,7 @@
+[submodule "third_party/hat-trie"]
+	path = third_party/hat-trie
+	url = https://github.com/ivsochenkov/hat-trie.git
+
+[submodule "third_party/robin-map"]
+	path = third_party/robin-map
+	url = https://github.com/ivsochenkov/robin-map.git

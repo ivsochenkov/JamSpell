@@ -15,8 +15,8 @@
 
 #include <contrib/handypack/handypack.hpp>
 
-#include <contrib/tsl/array-hash/array_map.h>
-#include <contrib/tsl/htrie_map.h>
+#include <tsl/array_map.h>
+#include <tsl/htrie_map.h>
 
 
 namespace NJamSpell 

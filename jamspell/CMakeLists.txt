@@ -1,12 +1,4 @@
-add_library(sivspell_lib 
-spell_corrector.cpp 
-lang_model.cpp 
-utils.cpp 
-alphabet.cpp 
-tokenizer.cpp 
-perfect_hash.cpp 
-bloom_filter.cpp
-)
+
 
 target_link_libraries(sivspell_lib phf cityhash)
 

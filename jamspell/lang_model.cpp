@@ -17,7 +17,8 @@
 #include "lang_model.hpp"
 
 #include <contrib/cityhash/city.h>
-#include <contrib/tsl/hopscotch_map.h>
+
+#include <tsl/robin_map.h>
 
 #ifndef ssize_t
 #define ssize_t int
@@ -114,14 +115,12 @@ struct TLangModel::TGramLoader
 
     };
 
-    using grams_type = tsl::hopscotch_map<TGramKey, TCount
+    using grams_type = tsl::robin_map<TGramKey, TCount
         , TGramKeyHash
         , std::equal_to<TGramKey>
         , std::allocator<std::pair<TGramKey, TCount> >
-        , 62 // NeighborhoodSize
         , false // store hash
-        //, tsl::rh::mod_growth_policy<std::ratio<11, 10> >
-        , tsl::hh::prime_growth_policy
+        , tsl::rh::prime_growth_policy
     >;
 
     using word_id_set_type = ::boost::dynamic_bitset<>;

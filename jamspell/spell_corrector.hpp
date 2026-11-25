@@ -3,7 +3,7 @@
 #include "lang_model.hpp"
 #include "bloom_filter.hpp"
 
-#include <contrib/tsl/robin_set.h>
+#include <tsl/robin_set.h>
 
 #include <boost/range/iterator_range.hpp>
 

@@ -1,3 +1,5 @@
+find_package(GTest)
+
 enable_testing()
 include_directories(${GTEST_INCLUDE_DIRS})
 add_executable(sivspell_tests test_perfect_hash.cpp)
