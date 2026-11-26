@@ -20,7 +20,7 @@ if(EXISTS "${TSL_HAT_TRIE_DIR}/include/tsl/htrie_hash.h")
 
     # and array-hash dependency!
     target_include_directories(sivspell_lib PUBLIC
-        "$<BUILD_INTERFACE:${TSL_HAT_TRIE_DIR}/third_party/include>")
+        "$<BUILD_INTERFACE:${TSL_HAT_TRIE_DIR}/third_party/array-hash/include>")
     
 else()
     set(TSL_USE_SYSTEM_HAT_TRIE TRUE)
